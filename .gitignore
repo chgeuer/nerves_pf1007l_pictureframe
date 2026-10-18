@@ -1,0 +1,17 @@
+# Mix / Elixir build artifacts
+_build/
+deps/
+*.ez
+erl_crash.dump
+
+# Nerves build artifacts and images
+.nerves/
+*.fw
+!**/lib/firmware/**/*.fw
+*.img
+*.tar.gz
+*.xz
+
+# Local environment / temporary files
+.DS_Store
+*.log

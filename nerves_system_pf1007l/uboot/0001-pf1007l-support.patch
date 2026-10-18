@@ -1,0 +1,50 @@
+diff --git a/arch/arm/dts/Makefile b/arch/arm/dts/Makefile
+index 7c8cf3a..0870deb 100644
+--- a/arch/arm/dts/Makefile
++++ b/arch/arm/dts/Makefile
+@@ -608,6 +608,7 @@ dtb-$(CONFIG_MACH_SUN8I_A33) += \
+ 	sun8i-a33-ippo-q8h-v1.2.dtb \
+ 	sun8i-a33-olinuxino.dtb \
+ 	sun8i-a33-q8-tablet.dtb \
++	sun8i-a33-pf1007l.dtb \
+ 	sun8i-a33-sinlinx-sina33.dtb \
+ 	sun8i-r16-bananapi-m2m.dtb \
+ 	sun8i-r16-nintendo-nes-classic.dtb \
+diff --git b/arch/arm/dts/sun8i-a33-pf1007l.dts b/arch/arm/dts/sun8i-a33-pf1007l.dts
+new file mode 100644
+index 0000000..f771530
+--- /dev/null
++++ b/arch/arm/dts/sun8i-a33-pf1007l.dts
+@@ -0,0 +1,32 @@
++// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
++/*
++ * Device Tree for AEEZO PF1007L (Allwinner A33, Q8 A33 base, no PMIC)
++ */
++
++#include "sun8i-a33-q8-tablet.dts"
++
++/ {
++	model = "AEEZO PF1007L Digital Photo Frame";
++	aliases {
++		mmc0 = &mmc0;
++	};
++};
++
++&mmc0 {
++	/delete-property/ cd-gpios;
++	broken-cd;
++	status = "okay";
++};
++
++&mmc1 {
++	status = "disabled";
++};
++
++&usb_otg {
++	dr_mode = "peripheral";
++};
++
++&usbphy {
++	/delete-property/ usb0_vbus-supply;
++	/delete-property/ usb0_id_det-gpios;
++};
