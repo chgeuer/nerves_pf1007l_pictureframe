@@ -4,7 +4,7 @@ Custom [Elixir Nerves](https://nerves-project.org/) system (`nerves_system_pf100
 
 Nerves boots entirely from an external **microSD card (`mmc0` / `/dev/mmcblk0`)**, leaving the factory Android installation on the internal 16 GB eMMC (`mmc2` / `/dev/mmcblk1`) untouched. Removing the microSD card boots the original stock firmware.
 
-<video src="https://github.com/chgeuer/nerves_pf1007l_pictureframe/raw/refs/heads/main/docs/demo.mp4" />
+<video src="https://raw.githubusercontent.com/chgeuer/nerves_pf1007l_pictureframe/refs/heads/main/docs/demo.mp4"></video>
 
 ---
 
