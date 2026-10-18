@@ -76,10 +76,23 @@ burn device="": firmware
         echo "Insert the microSD card into your computer's card reader and run: just burn"
         exit 1
     fi
-    echo "Burning {{fw_file}} (task: complete) to $DEV..."
+    FWUP_BIN="$(command -v fwup || echo "{{artifact_dir}}/host/bin/fwup")"
+    echo "Unmounting any auto-mounted partitions on $DEV..."
+    for mp in $(lsblk -lnpo NAME,MOUNTPOINT "$DEV" | awk '$2 != "" {print $1}'); do
+        udisksctl unmount -b "$mp" 2>/dev/null || sudo -n umount "$mp" 2>/dev/null || umount "$mp" 2>/dev/null || true
+    done
+    echo "Burning {{fw_file}} (task: complete) to $DEV using $FWUP_BIN..."
     lsblk "$DEV"
-    sudo fwup -a -y -i "{{fw_file}}" -d "$DEV" -t complete
+    if [ -w "$DEV" ]; then
+        "$FWUP_BIN" -a -y -i "{{fw_file}}" -d "$DEV" -t complete
+    else
+        sudo "$FWUP_BIN" -a -y -i "{{fw_file}}" -d "$DEV" -t complete
+    fi
     sync
+    sleep 1
+    for mp in $(lsblk -lnpo NAME,MOUNTPOINT "$DEV" | awk '$2 != "" {print $1}'); do
+        udisksctl unmount -b "$mp" 2>/dev/null || sudo -n umount "$mp" 2>/dev/null || umount "$mp" 2>/dev/null || true
+    done
     echo "Done! Safely remove the microSD card, insert it into the PF1007L, and plug in USB."
 
 # Build and upload firmware over USB Ethernet (OTA A/B upgrade via SSH fwup)
