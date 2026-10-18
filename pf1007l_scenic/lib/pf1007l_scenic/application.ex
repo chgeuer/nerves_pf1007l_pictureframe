@@ -11,6 +11,7 @@ defmodule Pf1007lScenic.Application do
   def start(_type, _args) do
     if @target != :host do
       init_hardware()
+      spawn(fn -> init_wifi_driver() end)
       spawn(fn -> write_boot_diagnostics() end)
     end
 
@@ -40,6 +41,16 @@ defmodule Pf1007lScenic.Application do
     unless File.exists?("/sys/bus/i2c/devices/0-0040/driver") do
       _ = File.write("/sys/bus/i2c/drivers/silead_ts/bind", "0-0040")
       Process.sleep(100)
+    end
+  rescue
+    _ -> :ok
+  end
+
+  defp init_wifi_driver do
+    if File.exists?("/lib/modules/6.12.34/extra/aic8800_bsp.ko") do
+      _ = System.cmd("/sbin/modprobe", ["aic8800_bsp"])
+      Process.sleep(300)
+      _ = System.cmd("/sbin/modprobe", ["aic8800_fdrv"])
     end
   rescue
     _ -> :ok
@@ -95,6 +106,8 @@ defmodule Pf1007lScenic.Application do
       main_viewport_config = Application.get_env(:pf1007l_scenic, :viewport)
 
       [
+        Pf1007lScenic.Accelerometer,
+        Pf1007lScenic.Schedule,
         {Scenic, [main_viewport_config]}
       ]
     end

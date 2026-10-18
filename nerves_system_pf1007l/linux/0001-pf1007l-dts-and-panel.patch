@@ -1,6 +1,6 @@
 diff -uNr a/arch/arm/boot/dts/allwinner/Makefile b/arch/arm/boot/dts/allwinner/Makefile
 --- a/arch/arm/boot/dts/allwinner/Makefile	2025-06-19 15:32:38.000000000 +0200
-+++ b/arch/arm/boot/dts/allwinner/Makefile	2026-10-18 10:04:07.278107160 +0200
++++ b/arch/arm/boot/dts/allwinner/Makefile	2026-10-18 14:20:10.190234634 +0200
 @@ -214,6 +214,7 @@
  	sun8i-a33-ippo-q8h-v1.2.dtb \
  	sun8i-a33-olinuxino.dtb \
@@ -11,8 +11,8 @@ diff -uNr a/arch/arm/boot/dts/allwinner/Makefile b/arch/arm/boot/dts/allwinner/M
  	sun8i-a83t-bananapi-m3.dtb \
 diff -uNr a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts b/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts
 --- a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts	1970-01-01 01:00:00.000000000 +0100
-+++ b/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts	2026-10-18 10:04:07.278644120 +0200
-@@ -0,0 +1,195 @@
++++ b/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts	2026-10-18 14:20:10.192006347 +0200
+@@ -0,0 +1,196 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * Device Tree for AEEZO PF1007L (Allwinner A33, yhk_zr789_sq9365_101 800x1280 MIPI-DSI)
@@ -71,7 +71,8 @@ diff -uNr a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts b/arch/arm/boot/dt
 +
 +	wifi_pwrseq: wifi-pwrseq {
 +		compatible = "mmc-pwrseq-simple";
-+		reset-gpios = <&r_pio 0 6 GPIO_ACTIVE_LOW>; /* PL6 wl_reg_on */
++		reset-gpios = <&r_pio 0 5 GPIO_ACTIVE_LOW>, /* PL5 chip_en */
++		              <&r_pio 0 6 GPIO_ACTIVE_LOW>; /* PL6 wl_reg_on */
 +		post-power-on-delay-ms = <200>;
 +	};
 +};
@@ -210,7 +211,7 @@ diff -uNr a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts b/arch/arm/boot/dt
 +};
 diff -uNr a/drivers/gpu/drm/panel/panel-jadard-jd9365da-h3.c b/drivers/gpu/drm/panel/panel-jadard-jd9365da-h3.c
 --- a/drivers/gpu/drm/panel/panel-jadard-jd9365da-h3.c	2025-06-19 15:32:38.000000000 +0200
-+++ b/drivers/gpu/drm/panel/panel-jadard-jd9365da-h3.c	2026-10-18 10:04:07.279151927 +0200
++++ b/drivers/gpu/drm/panel/panel-jadard-jd9365da-h3.c	2026-10-18 14:20:10.193657285 +0200
 @@ -109,14 +109,14 @@
  	if (jadard->desc->lp11_to_reset_delay_ms)
  		msleep(jadard->desc->lp11_to_reset_delay_ms);
@@ -508,7 +509,7 @@ diff -uNr a/drivers/gpu/drm/panel/panel-jadard-jd9365da-h3.c b/drivers/gpu/drm/p
  	},
 diff -uNr a/drivers/gpu/drm/sun4i/sun6i_mipi_dsi.c b/drivers/gpu/drm/sun4i/sun6i_mipi_dsi.c
 --- a/drivers/gpu/drm/sun4i/sun6i_mipi_dsi.c	2025-06-19 15:32:38.000000000 +0200
-+++ b/drivers/gpu/drm/sun4i/sun6i_mipi_dsi.c	2026-10-18 10:04:07.279666946 +0200
++++ b/drivers/gpu/drm/sun4i/sun6i_mipi_dsi.c	2026-10-18 14:20:10.195378634 +0200
 @@ -161,6 +161,7 @@
  #define SUN6I_DSI_SYNC_POINT		40
  
@@ -608,7 +609,7 @@ diff -uNr a/drivers/gpu/drm/sun4i/sun6i_mipi_dsi.c b/drivers/gpu/drm/sun4i/sun6i
  
 diff -uNr a/drivers/input/touchscreen/silead.c b/drivers/input/touchscreen/silead.c
 --- a/drivers/input/touchscreen/silead.c	2025-06-19 15:32:38.000000000 +0200
-+++ b/drivers/input/touchscreen/silead.c	2026-10-18 10:04:07.279710747 +0200
++++ b/drivers/input/touchscreen/silead.c	2026-10-18 14:20:10.197220949 +0200
 @@ -320,25 +320,24 @@
  					  SILEAD_CMD_RESET);
  	if (error)

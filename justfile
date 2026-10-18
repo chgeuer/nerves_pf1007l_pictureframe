@@ -97,6 +97,8 @@ burn device="": firmware
 
 # Build and upload firmware over USB Ethernet (OTA A/B upgrade via SSH fwup)
 upload ip=default_ip: firmware
+    ssh-keygen -R "{{ip}}" 2>/dev/null || true
+    ssh-keyscan -H "{{ip}}" >> ~/.ssh/known_hosts 2>/dev/null || true
     cd "{{app_dir}}" && mix upload "{{ip}}"
 
 # Open an interactive IEx shell on the picture frame over SSH
@@ -156,7 +158,8 @@ kernel-rebuild: dsi-init
     make -C "{{artifact_dir}}" linux-rebuild
     cp -f "{{artifact_dir}}/images/zImage" "{{artifact_dir}}/target/boot/zImage"
     cp -f "{{artifact_dir}}/images/sun8i-a33-pf1007l.dtb" "{{artifact_dir}}/target/boot/sun8i-a33-pf1007l.dtb"
-    make -C "{{artifact_dir}}" system
+    "{{artifact_dir}}/host/sbin/depmod" -a -b "{{artifact_dir}}/target" 6.12.34
+    make -C "{{artifact_dir}}" BR2_EXTERNAL_NERVES_PATH="{{app_dir}}/deps/nerves_system_br" NERVES_DEFCONFIG_DIR="{{system_dir}}" rootfs-squashfs
     just system-checksum
 
 # Regenerate linux/0001-pf1007l-dts-and-panel.patch from build/linux-custom and verify clean apply
@@ -164,7 +167,7 @@ kernel-save-patch:
     #!/usr/bin/env bash
     set -euo pipefail
     LINUX_CUSTOM="{{artifact_dir}}/build/linux-custom"
-    TARBALL="$HOME/.nerves/dl/linux-6.12.34.tar.xz"
+    TARBALL="$HOME/.nerves/dl/linux/linux-6.12.34.tar.xz"
     PATCH_OUT="{{system_dir}}/linux/0001-pf1007l-dts-and-panel.patch"
     TMP_DIR="$(mktemp -d)"
     trap 'rm -rf "$TMP_DIR"' EXIT
@@ -189,3 +192,39 @@ kernel-save-patch:
     (cd "$TMP_DIR" && diff -uNr a b > "$PATCH_OUT" || true)
     patch -d "$TMP_DIR/a" -p1 --dry-run < "$PATCH_OUT"
     echo "Updated $PATCH_OUT ($(wc -l < "$PATCH_OUT") lines)"
+
+# Cross-compile the AIC8800DC SDIO Wi-Fi kernel modules against build/linux-custom
+wifi-driver:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    KDIR="{{artifact_dir}}/build/linux-custom"
+    CROSS="{{artifact_dir}}/host/bin/armv7-nerves-linux-gnueabihf-"
+    DRV="{{system_dir}}/c_src/aic8800"
+    make -C "$KDIR" M="$DRV" ARCH=arm CROSS_COMPILE="$CROSS" \
+        CONFIG_AIC_FW_PATH="/lib/firmware/aic8800_fw/SDIO/aic8800DC" \
+        CONFIG_AIC8800_WLAN_SUPPORT=m \
+        CONFIG_AIC_INTF_SDIO=y \
+        modules -j$(nproc)
+    mkdir -p "{{system_dir}}/rootfs_overlay/lib/modules/6.12.34/extra"
+    cp -f "$DRV/aic8800_bsp/aic8800_bsp.ko" "$DRV/aic8800_fdrv/aic8800_fdrv.ko" \
+        "{{system_dir}}/rootfs_overlay/lib/modules/6.12.34/extra/"
+    find "$DRV" \( -name '*.o' -o -name '*.ko' -o -name '*.mod*' -o -name '.*.cmd' -o -name 'modules.order' -o -name 'Module.symvers' \) -delete
+    just system-checksum
+
+# Copy local ~/.config/untis/credentials.json to /root/untis_credentials.json on the frame
+untis-push-creds ip=default_ip creds="~/.config/untis/credentials.json":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    CREDS_PATH=$(eval echo "{{creds}}")
+    B64=$(base64 -w0 "$CREDS_PATH")
+    UTC_SEC=$(date -u +%s)
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "{{ip}}" \
+        "System.cmd(\"date\", [\"-u\", \"-s\", \"@$UTC_SEC\"]); File.write!(\"/root/untis_credentials.json\", Base.decode64!(\"$B64\")); Task.start(fn -> Pf1007lScenic.Schedule.resume() end)"
+
+# Sync the frame's UTC system clock from the host over SSH
+sync-time ip=default_ip:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    UTC_SEC=$(date -u +%s)
+    ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null "{{ip}}" \
+        "System.cmd(\"date\", [\"-u\", \"-s\", \"@$UTC_SEC\"]); DateTime.utc_now()"

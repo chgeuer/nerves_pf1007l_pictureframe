@@ -55,6 +55,9 @@ defmodule Pf1007lScenic.MixProject do
        branch: "main",
        targets: @all_targets},
 
+      # WebUntis / Untis Mobile client
+      {:untis, path: "../untis"},
+
       # Custom Nerves system for Allwinner A33 PF1007L
       {:nerves_system_pf1007l,
        path: "../nerves_system_pf1007l",
