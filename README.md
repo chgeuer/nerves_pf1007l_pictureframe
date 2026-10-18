@@ -12,6 +12,25 @@ Nerves boots entirely from an external **microSD card (`mmc0` / `/dev/mmcblk0`)*
 | --- | --- |
 | [`nerves_system_pf1007l/`](./nerves_system_pf1007l) | Custom Nerves System (Buildroot + mainline **Linux 6.12.34** + **U-Boot 2025.10**) with PF1007L device tree, JD9365DA 800×1280 MIPI-DSI panel support, Silead GSL1680 touchscreen driver + built-in firmware, RTL8723DS Wi-Fi driver, Cairo/Pango/Fontconfig for Scenic, and USB CDC Ethernet gadget. |
 | [`pf1007l_scenic/`](./pf1007l_scenic) | Nerves + Scenic firmware application rendering a 60 FPS interactive UI to `/dev/fb0` via `scenic_driver_local` with calibrated `silead_ts` capacitive touch input, VintageNet USB gadget networking (`172.31.101.185`), and SSH / OTA firmware updates (`mix upload`). |
+| [`justfile`](./justfile) | Task runner codifying firmware builds (`just firmware`), microSD card flashing (`just burn`), OTA updates (`just upload`), remote IEx/logs (`just ssh`, `just logs`, `just dmesg`), and kernel/system rebuilds (`just kernel-rebuild`, `just kernel-save-patch`). |
+
+---
+
+## Quick Usage with `just`
+
+```bash
+just --list           # List all recipes
+just status           # Check USB devices, microSD reader, and 172.31.101.185 connectivity
+just firmware         # Build pf1007l_scenic.fw
+just image            # Build both .fw and raw bootable pf1007l_scenic.img
+just burn             # Auto-detect the microSD card in your reader and burn the complete image
+just upload           # Build and push an OTA A/B firmware update to 172.31.101.185
+just ssh              # Open an interactive IEx shell on the picture frame
+just logs             # Dump recent RingLogger output over SSH
+just dmesg            # Dump kernel dmesg over SSH
+just dsi-init         # Cross-compile c_src/pf1007l_dsi_init.c -> rootfs_overlay/usr/bin/pf1007l-dsi-init
+just kernel-rebuild   # Rebuild Linux 6.12.34 + DTB and repackage the Nerves system artifact
+```
 
 ---
 
