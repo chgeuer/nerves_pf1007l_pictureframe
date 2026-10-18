@@ -1,6 +1,6 @@
 # Nerves + Scenic on the Allwinner A33 PF1007L Digital Photo Frame
 
-Custom [Elixir Nerves](https://nerves-project.org/) system (`nerves_system_pf1007l`) and [Scenic](https://github.com/ScenicFramework/scenic) touchscreen UI application (`pf1007l_scenic`) for the **PF1007L** (`AEEZO` / `yhk_zr789_sq9365_101`) 10.1" 800×1280 IPS touchscreen digital photo frame powered by the **Allwinner A33 (`sun8i-a33`)** SoC.
+Custom [Elixir Nerves](https://nerves-project.org/) system (`nerves_system_pf1007l`) and [Scenic](https://github.com/ScenicFramework/scenic) touchscreen UI application (`pf1007l_scenic`) for the **PF1007L** (`AEEZO` / `yhk_zr789_sq9365_101`) 10.1" 800×1280 IPS touchscreen digital photo frame powered by the **Allwinner A33 (`sun8i-a33`)** SoC, Like [this one from amazon.de](https://www.amazon.de/dp/B0GDFBNPHX).
 
 Nerves boots entirely from an external **microSD card (`mmc0` / `/dev/mmcblk0`)**, leaving the factory Android installation on the internal 16 GB eMMC (`mmc2` / `/dev/mmcblk1`) untouched. Removing the microSD card boots the original stock firmware.
 
