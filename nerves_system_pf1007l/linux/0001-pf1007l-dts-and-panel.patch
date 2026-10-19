@@ -12,7 +12,7 @@ diff -uNr a/arch/arm/boot/dts/allwinner/Makefile b/arch/arm/boot/dts/allwinner/M
 diff -uNr a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts b/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts
 --- a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts	1970-01-01 01:00:00.000000000 +0100
 +++ b/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts	2026-10-18 14:20:10.192006347 +0200
-@@ -0,0 +1,196 @@
+@@ -0,0 +1,206 @@
 +// SPDX-License-Identifier: (GPL-2.0+ OR MIT)
 +/*
 + * Device Tree for AEEZO PF1007L (Allwinner A33, yhk_zr789_sq9365_101 800x1280 MIPI-DSI)
@@ -100,6 +100,16 @@ diff -uNr a/arch/arm/boot/dts/allwinner/sun8i-a33-pf1007l.dts b/arch/arm/boot/dt
 +};
 +
 +&cpu0_opp_table {
++	/*
++	 * Keep a single fixed OPP. On the A33, CPU clock transitions make the
++	 * ARM arch timer counter briefly step backwards (observed 1..4092
++	 * ticks), which breaks CLOCK_MONOTONIC and makes the Erlang VM abort
++	 * with "OS monotonic time stepped backwards". U-Boot already runs the
++	 * CPU at 408 MHz and the lower OPPs use the same 1.04 V.
++	 */
++	/delete-node/ opp-120000000;
++	/delete-node/ opp-240000000;
++	/delete-node/ opp-312000000;
 +	/delete-node/ opp-480000000;
 +	/delete-node/ opp-504000000;
 +	/delete-node/ opp-600000000;

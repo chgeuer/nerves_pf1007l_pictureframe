@@ -42,7 +42,7 @@ The PF1007L (`yhk_zr789_sq9365_101`) uses an Allwinner A33 (`sun8i-a33`) with **
 
 | Subsystem | Hardware / IC | A33 Bus / Pins | Linux Driver / Notes |
 | --- | --- | --- | --- |
-| **SoC / CPU** | Allwinner A33 (4× Cortex-A7) | `PLL_CPUX` @ 408 MHz | Fixed `VDD-CPU` rail (no PMIC); OPPs above 408 MHz are removed in DT to prevent brownout when `cpufreq-dt` probes |
+| **SoC / CPU** | Allwinner A33 (4× Cortex-A7) | `PLL_CPUX` @ 408 MHz | Fixed `VDD-CPU` rail (no PMIC); only the 408 MHz OPP is kept in DT so `cpufreq-dt` never changes the CPU clock |
 | **RAM** | 1 GiB DDR3 | `PLL_DDR` @ 432 MHz | Configured in U-Boot SPL (`CONFIG_DRAM_CLK=432`, `CONFIG_DRAM_ZQ=15291`) |
 | **MIPI-DSI Panel** | Jadard JD9365DA (`sq9365_101`), 800×1280, 4-lane | `MIPI-DSI` + `D-PHY` + `TCON0`, Reset: `PH7` | `panel-jadard-jd9365da-h3` + `/usr/bin/pf1007l-dsi-init` (non-burst sync-pulse video mode, 66 MHz dotclock, `hfp=20, hbp=20, hsync=20`, `vfp=30, vbp=12, vsync=4`) |
 | **Backlight** | PWM LED Backlight | PWM0: `PH0`, Enable: `PH6` | `pwm-backlight` + `pf1007l-dsi-init` (20 kHz PWM on `PH0`, active-high enable on `PH6`) |
@@ -57,6 +57,7 @@ The PF1007L (`yhk_zr789_sq9365_101`) uses an Allwinner A33 (`sun8i-a33`) with **
 
 1. **CPU Frequency Stability (`sun8i-a33-pf1007l.dts`)**:
    Because this board omits the AXP223 PMIC (`VDD-CPU` is fixed at ~1.1 V), allowing `cpufreq-dt` to switch `CLK_CPUX` above 408 MHz causes immediate instruction corruption. All OPPs above 408 MHz (`480 MHz`–`1008 MHz`) are deleted from `&cpu0_opp_table`.
+   The OPPs below 408 MHz (`120`/`240`/`312 MHz`) are deleted as well, leaving a single fixed OPP. `CLK_CPUX` rate changes can make the ARM arch timer counter briefly step backwards (observed 1–4092 ticks of the 24 MHz counter, on all cores at once), so `CLOCK_MONOTONIC` goes backwards. The Erlang VM detects this, aborts with `OS monotonic time stepped backwards!`, and `erlinit` reboots the board (the screen goes black). With the default `schedutil` governor this happened every few minutes.
 2. **Jadard JD9365DA MIPI-DSI 60 FPS Video Scanout (`panel-jadard-jd9365da-h3.c`, `sun6i_mipi_dsi.c`, `pf1007l_dsi_init.c`)**:
    - Enters `DSI_START_LP11` before panel reset/prepare so the panel exits sleep cleanly (`0x0A = 0x9C`).
    - Sets Page 3 register `0xE6 = 0x00` (instead of `0x02`) in the 203-command vendor table so the JD9365DA internal watchdog does not clear `DISON` (`0x0A` bit 2) in non-burst mode.
