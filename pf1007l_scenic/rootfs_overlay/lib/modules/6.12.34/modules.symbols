@@ -1,0 +1,14 @@
+# Aliases for symbols, used by symbol_request().
+alias symbol:get_adap_test aic8800_bsp
+alias symbol:aicbsp_get_feature aic8800_bsp
+alias symbol:dpd_res aic8800_bsp
+alias symbol:aicbsp_set_subsys aic8800_bsp
+alias symbol:set_irq_handler aic8800_bsp
+alias symbol:aicwf_prealloc_txq_alloc aic8800_bsp
+alias symbol:get_sdio_func aic8800_bsp
+alias symbol:aicbsp_get_load_fw_in_fdrv aic8800_bsp
+alias symbol:get_fw_path aic8800_bsp
+alias symbol:get_fdrv_no_reg_sdio aic8800_bsp
+alias symbol:aicbsp_resv_mem_kfree_skb aic8800_bsp
+alias symbol:aicbsp_resv_mem_alloc_skb aic8800_bsp
+alias symbol:get_testmode aic8800_bsp

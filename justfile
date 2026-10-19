@@ -159,7 +159,7 @@ kernel-rebuild: dsi-init
     cp -f "{{artifact_dir}}/images/zImage" "{{artifact_dir}}/target/boot/zImage"
     cp -f "{{artifact_dir}}/images/sun8i-a33-pf1007l.dtb" "{{artifact_dir}}/target/boot/sun8i-a33-pf1007l.dtb"
     "{{artifact_dir}}/host/sbin/depmod" -a -b "{{artifact_dir}}/target" 6.12.34
-    make -C "{{artifact_dir}}" BR2_EXTERNAL_NERVES_PATH="{{app_dir}}/deps/nerves_system_br" NERVES_DEFCONFIG_DIR="{{system_dir}}" rootfs-squashfs
+    NERVES_BR_VERSION="$(cat "{{app_dir}}/deps/nerves_system_br/VERSION")" make -C "{{artifact_dir}}" BR2_EXTERNAL_NERVES_PATH="{{app_dir}}/deps/nerves_system_br" NERVES_DEFCONFIG_DIR="{{system_dir}}" rootfs-squashfs
     just system-checksum
 
 # Regenerate linux/0001-pf1007l-dts-and-panel.patch from build/linux-custom and verify clean apply
@@ -200,14 +200,22 @@ wifi-driver:
     KDIR="{{artifact_dir}}/build/linux-custom"
     CROSS="{{artifact_dir}}/host/bin/armv7-nerves-linux-gnueabihf-"
     DRV="{{system_dir}}/c_src/aic8800"
+    SYS_EXTRA="{{system_dir}}/rootfs_overlay/lib/modules/6.12.34/extra"
+    APP_MODS="{{app_dir}}/rootfs_overlay/lib/modules/6.12.34"
+    TGT_MODS="{{artifact_dir}}/target/lib/modules/6.12.34"
     make -C "$KDIR" M="$DRV" ARCH=arm CROSS_COMPILE="$CROSS" \
-        CONFIG_AIC_FW_PATH="/lib/firmware/aic8800_fw/SDIO/aic8800DC" \
+        CONFIG_AIC_FW_PATH="/lib/firmware/aic8800_fw/SDIO" \
         CONFIG_AIC8800_WLAN_SUPPORT=m \
+        CONFIG_AIC8800_BTLPM_SUPPORT=n \
         CONFIG_AIC_INTF_SDIO=y \
         modules -j$(nproc)
-    mkdir -p "{{system_dir}}/rootfs_overlay/lib/modules/6.12.34/extra"
-    cp -f "$DRV/aic8800_bsp/aic8800_bsp.ko" "$DRV/aic8800_fdrv/aic8800_fdrv.ko" \
-        "{{system_dir}}/rootfs_overlay/lib/modules/6.12.34/extra/"
+    mkdir -p "$SYS_EXTRA" "$APP_MODS/extra" "$TGT_MODS/extra"
+    cp -f "$DRV/aic8800_bsp/aic8800_bsp.ko" "$DRV/aic8800_fdrv/aic8800_fdrv.ko" "$SYS_EXTRA/"
+    "${CROSS}strip" --strip-debug "$SYS_EXTRA/"*.ko
+    cp -f "$SYS_EXTRA/"*.ko "$APP_MODS/extra/"
+    cp -f "$SYS_EXTRA/"*.ko "$TGT_MODS/extra/"
+    "{{artifact_dir}}/host/sbin/depmod" -a -b "{{artifact_dir}}/target" 6.12.34
+    cp -f "$TGT_MODS"/modules.* "$APP_MODS/"
     find "$DRV" \( -name '*.o' -o -name '*.ko' -o -name '*.mod*' -o -name '.*.cmd' -o -name 'modules.order' -o -name 'Module.symvers' \) -delete
     just system-checksum
 

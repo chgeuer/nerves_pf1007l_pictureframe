@@ -1,0 +1,2 @@
+extra/aic8800_fdrv.ko: extra/aic8800_bsp.ko
+extra/aic8800_bsp.ko:
