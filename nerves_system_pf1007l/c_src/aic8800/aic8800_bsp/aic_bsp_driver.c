@@ -2223,6 +2223,10 @@ int aicbsp_driver_fw_init(struct aic_sdio_dev *sdiodev)
 
 int aicbsp_get_feature(struct aicbsp_feature_t *feature, char *fw_path)
 {
+	if (!aicbsp_sdiodev) {
+		sdio_err("%s: aicbsp_sdiodev is NULL\n", __func__);
+		return -ENODEV;
+	}
 	if (aicbsp_sdiodev->chipid == PRODUCT_ID_AIC8801 ||
         aicbsp_sdiodev->chipid == PRODUCT_ID_AIC8800DC ||
         aicbsp_sdiodev->chipid == PRODUCT_ID_AIC8800DW){

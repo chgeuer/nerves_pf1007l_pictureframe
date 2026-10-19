@@ -525,7 +525,8 @@ static const struct sdio_device_id aicbsp_sdmmc_ids[] = {
 	{ },
 };
 
-MODULE_DEVICE_TABLE(sdio, aicbsp_sdmmc_ids);
+// Disabled so udev/UEvent does not race with explicit hardware reset + modprobe:
+// MODULE_DEVICE_TABLE(sdio, aicbsp_sdmmc_ids);
 
 static const struct dev_pm_ops aicbsp_sdio_pm_ops = {
 	SET_SYSTEM_SLEEP_PM_OPS(aicbsp_sdio_suspend, aicbsp_sdio_resume)
@@ -664,13 +665,17 @@ void aicbsp_sdio_exit(void)
 	sdio_unregister_driver(&aicbsp_sdio_driver);
 }
 
+int aicwf_sdio_writeb_func2(struct aic_sdio_dev *sdiodev, uint regaddr, u8 val);
+
 void aicbsp_sdio_release(struct aic_sdio_dev *sdiodev)
 {
 	sdiodev->bus_if->state = BUS_DOWN_ST;
+	aicwf_sdio_writeb(sdiodev, sdiodev->sdio_reg.intr_config_reg, 0x0);
 	sdio_claim_host(sdiodev->func);
 	sdio_release_irq(sdiodev->func);
 	sdio_release_host(sdiodev->func);
 	if(sdiodev->chipid == PRODUCT_ID_AIC8800DC  || sdiodev->chipid == PRODUCT_ID_AIC8800DW){
+		aicwf_sdio_writeb_func2(sdiodev, sdiodev->sdio_reg.intr_config_reg, 0x0);
 		sdio_claim_host(sdiodev->func_msg);
 		sdio_release_irq(sdiodev->func_msg);
 		sdio_release_host(sdiodev->func_msg);
@@ -1378,13 +1383,8 @@ static int aicwf_sdio_bus_start(struct device *dev)
 		sdio_release_host(sdiodev->func);
 	}else if(sdiodev->chipid == PRODUCT_ID_AIC8800DC || sdiodev->chipid == PRODUCT_ID_AIC8800DW){
 		sdio_claim_host(sdiodev->func);
-
-		//since we have func2 we don't register irq handler
-		sdio_claim_irq(sdiodev->func, NULL);
-		sdio_claim_irq(sdiodev->func_msg, NULL);
-
-		sdiodev->func->irq_handler = (sdio_irq_handler_t *)aicwf_sdio_hal_irqhandler;
-		sdiodev->func_msg->irq_handler = (sdio_irq_handler_t *)aicwf_sdio_hal_irqhandler_func2;
+		sdio_claim_irq(sdiodev->func, aicwf_sdio_hal_irqhandler);
+		sdio_claim_irq(sdiodev->func_msg, aicwf_sdio_hal_irqhandler_func2);
 		sdio_release_host(sdiodev->func);
 
 		//enable sdio interrupt
@@ -1523,9 +1523,19 @@ void aicwf_sdio_hal_irqhandler(struct sdio_func *func)
 
     if (sdiodev->chipid  == PRODUCT_ID_AIC8801 || sdiodev->chipid  == PRODUCT_ID_AIC8800DC ||
         sdiodev->chipid  == PRODUCT_ID_AIC8800DW) {
+    	int max_loops = 16;
     	ret = aicwf_sdio_readb(sdiodev, sdiodev->sdio_reg.block_cnt_reg, &intstatus);
+    	if (ret == 0 && (intstatus & SDIO_OTHER_INTERRUPT)) {
+    	    u8 int_pending = 0;
+    	    if (aicwf_sdio_readb(sdiodev, sdiodev->sdio_reg.sleep_reg, &int_pending) == 0) {
+    	        int_pending &= ~0x01;
+    	        aicwf_sdio_writeb(sdiodev, sdiodev->sdio_reg.sleep_reg, int_pending);
+    	    }
+    	    intstatus &= ~SDIO_OTHER_INTERRUPT;
+    	}
 
-    	while(intstatus){
+    	while (ret == 0 && (intstatus & 0x7F) && max_loops-- > 0) {
+    	    intstatus &= 0x7F;
     	    sdiodev->rx_priv->data_len = intstatus * SDIOWIFI_FUNC_BLOCKSIZE;
     	    if (intstatus > 0) {
     	        if(intstatus < 64) {
@@ -1535,17 +1545,23 @@ void aicwf_sdio_hal_irqhandler(struct sdio_func *func)
     	            sdio_info("byte mode len=%d\r\n", byte_len);
     	            pkt = aicwf_sdio_readframes(sdiodev, 0);
     	        }
-    	    } else {
-    	#ifndef CONFIG_PLATFORM_ALLWINNER
-    	        sdio_err("Interrupt but no data\n");
-    	#endif
     	    }
 
     	    if (pkt)
     	        aicwf_sdio_enq_rxpkt(sdiodev, pkt);
 
     	    ret = aicwf_sdio_readb(sdiodev, sdiodev->sdio_reg.block_cnt_reg, &intstatus);
+    	    if (ret == 0 && (intstatus & SDIO_OTHER_INTERRUPT)) {
+    	        u8 int_pending = 0;
+    	        if (aicwf_sdio_readb(sdiodev, sdiodev->sdio_reg.sleep_reg, &int_pending) == 0) {
+    	            int_pending &= ~0x01;
+    	            aicwf_sdio_writeb(sdiodev, sdiodev->sdio_reg.sleep_reg, int_pending);
+    	        }
+    	        intstatus &= ~SDIO_OTHER_INTERRUPT;
+    	    }
     	}
+    	if (ret != 0)
+    	    msleep(1);
     }else if (sdiodev->chipid  == PRODUCT_ID_AIC8800D80 ||
 			sdiodev->chipid == PRODUCT_ID_AIC8800D80N ||
 			sdiodev->chipid == PRODUCT_ID_AIC8800D80WN ||
@@ -1632,8 +1648,10 @@ void aicwf_sdio_hal_irqhandler_func2(struct sdio_func *func)
 	#endif
 
     ret = aicwf_sdio_readb_func2(sdiodev, sdiodev->sdio_reg.block_cnt_reg, &intstatus);
-
-	while(intstatus) {
+    {
+	int max_loops = 16;
+	while (ret == 0 && (intstatus & 0x7F) && max_loops-- > 0) {
+	    intstatus &= 0x7F;
 	    sdiodev->rx_priv->data_len = intstatus * SDIOWIFI_FUNC_BLOCKSIZE;
 	    if (intstatus > 0) {
 	        if(intstatus < 64) {
@@ -1644,17 +1662,16 @@ void aicwf_sdio_hal_irqhandler_func2(struct sdio_func *func)
 	            aicwf_sdio_intr_get_len_bytemode(sdiodev, &byte_len);//byte_len must<= 128
 	            pkt = aicwf_sdio_readframes(sdiodev,1);
 	        }
-	    } else {
-		#ifndef CONFIG_PLATFORM_ALLWINNER
-	        sdio_err("Interrupt but no data\n");
-		#endif
 	    }
 
 	    if (pkt){
 	        aicwf_sdio_enq_rxpkt(sdiodev, pkt);
 	    }
-		ret = aicwf_sdio_readb_func2(sdiodev, sdiodev->sdio_reg.block_cnt_reg, &intstatus);
+	    ret = aicwf_sdio_readb_func2(sdiodev, sdiodev->sdio_reg.block_cnt_reg, &intstatus);
 	}
+	if (ret != 0)
+	    msleep(1);
+    }
 
 	complete(&bus_if->busrx_trgg);
 }

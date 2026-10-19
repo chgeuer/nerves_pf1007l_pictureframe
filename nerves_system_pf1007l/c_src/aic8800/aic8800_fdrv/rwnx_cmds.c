@@ -140,6 +140,7 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 	trace_msg_send(cmd->id);
 #endif
 	if(cmd->e2a_msg != NULL) {
+		int wait_loops = 0;
 		do {
 			spin_lock_bh(&cmd_mgr->lock);
 			if(cmd_mgr->state == RWNX_CMD_MGR_STATE_CRASHED) {
@@ -151,6 +152,11 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 			empty = list_empty(&cmd_mgr->cmds);
 			if(!empty) {
 				spin_unlock_bh(&cmd_mgr->lock);
+				if (++wait_loops > 100) {
+					printk(KERN_ERR "cmd_mgr_queue wait empty timeout\n");
+					spin_lock_bh(&cmd_mgr->lock);
+					break;
+				}
 				if(in_softirq()) {
 					printk("in_softirq:check cmdqueue empty\n");
 					mdelay(10);
@@ -273,7 +279,10 @@ static int cmd_mgr_queue(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 				cmd->result = -ETIMEDOUT;
 				cmd_complete(cmd_mgr, cmd);
 			}
+			list_del(&cmd->list);
+			cmd_mgr->queue_sz--;
 			spin_unlock_bh(&cmd_mgr->lock);
+			rwnx_cmd_free(cmd);
 		} else {
 			spin_lock_bh(&cmd_mgr->lock);
 			list_del(&cmd->list);
@@ -332,7 +341,7 @@ static int cmd_mgr_llind(struct rwnx_cmd_mgr *cmd_mgr, struct rwnx_cmd *cmd)
 		kfree(next->a2e_msg);
 	#endif
 	}
-	spin_unlock(&cmd_mgr->lock);
+	spin_unlock_bh(&cmd_mgr->lock);
 
 	return 0;
 }
@@ -352,8 +361,10 @@ void cmd_mgr_task_process(struct work_struct *work)
 		list_for_each_entry(cur, &cmd_mgr->cmds, list) {
 			if (cur->flags & RWNX_CMD_FLAG_WAIT_PUSH) { //just judge the first
 					next = cur;
+					break;
 			}
-			break;
+			if (cur->flags & (RWNX_CMD_FLAG_WAIT_ACK | RWNX_CMD_FLAG_WAIT_CFM))
+				break;
 		}
 		spin_unlock_bh(&cmd_mgr->lock);
 
@@ -395,7 +406,10 @@ void cmd_mgr_task_process(struct work_struct *work)
 					next->result = -ETIMEDOUT;
 					cmd_complete(cmd_mgr, next);
 				}
+				list_del(&next->list);
+				cmd_mgr->queue_sz--;
 				spin_unlock_bh(&cmd_mgr->lock);
+				rwnx_cmd_free(next);
 			} else {
 				spin_lock_bh(&cmd_mgr->lock);
 				list_del(&next->list);
@@ -405,7 +419,6 @@ void cmd_mgr_task_process(struct work_struct *work)
 			}
 		}
 	}
-
 }
 
 

@@ -1126,7 +1126,6 @@ static int rwnx_open(struct net_device *dev)
 			}
 			rwnx_hw->is_p2p_alive = 1;
 #ifndef CONFIG_USE_P2P0
-			mod_timer(&rwnx_hw->p2p_alive_timer, jiffies + msecs_to_jiffies(1000));
 			atomic_set(&rwnx_hw->p2p_alive_timer_count, 0);
 #endif
 		}
@@ -1802,18 +1801,9 @@ void aicwf_p2p_alive_timeout(struct timer_list *t)
 		atomic_set(&rwnx_hw->p2p_alive_timer_count, 0);
 
 	rwnx_hw->is_p2p_alive = 0;
-	if (rwnx_vif->up) {
-		rwnx_send_remove_if (rwnx_hw, rwnx_vif->vif_index, true);
-
-		/* Ensure that we won't process disconnect ind */
-		spin_lock_bh(&rwnx_hw->cb_lock);
-
-		rwnx_vif->up = false;
-		rwnx_hw->vif_table[rwnx_vif->vif_index] = NULL;
-        AICWFDBG(LOGDEBUG, "%s rwnx_vif[%d] down \r\n", __func__, rwnx_vif->vif_index);
-		rwnx_hw->vif_started--;
-		spin_unlock_bh(&rwnx_hw->cb_lock);
-	}
+	/* Do not call rwnx_send_remove_if() from inside a timer_list callback:
+	 * rwnx_send_remove_if() calls wait_for_completion_timeout() in atomic
+	 * softirq context, which crashes/locks the kernel after 200 seconds. */
 }
 
 
@@ -1881,13 +1871,6 @@ static struct wireless_dev *rwnx_virtual_interface_add(struct rwnx_hw *rwnx_hw,
 	spin_unlock_bh(&rwnx_hw->cb_lock);
 
 	if (rwnx_hw->is_p2p_alive == 0) {
-		#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 15, 0)
-		init_timer(&rwnx_hw->p2p_alive_timer);
-		rwnx_hw->p2p_alive_timer.data = (unsigned long)vif;
-		rwnx_hw->p2p_alive_timer.function = aicwf_p2p_alive_timeout;
-		#else
-		timer_setup(&rwnx_hw->p2p_alive_timer, aicwf_p2p_alive_timeout, 0);
-		#endif
 		rwnx_hw->is_p2p_alive = 0;
 		rwnx_hw->is_p2p_connected = 0;
 		rwnx_hw->p2p_dev_vif = vif;
@@ -1997,6 +1980,11 @@ static int rwnx_cfg80211_del_iface(struct wiphy *wiphy, struct wireless_dev *wde
 	AICWFDBG(LOGINFO, "del_iface: %p, %x\n", wdev, wdev->address[5]);
 
 	if (!dev || !rwnx_vif->ndev) {
+		if (rwnx_hw->p2p_dev_vif == rwnx_vif) {
+			del_timer_sync(&rwnx_hw->p2p_alive_timer);
+			rwnx_hw->p2p_dev_vif = NULL;
+			rwnx_hw->is_p2p_alive = 0;
+		}
 		cfg80211_unregister_wdev(wdev);
 		spin_lock_bh(&rwnx_hw->cb_lock);
 		list_del(&rwnx_vif->list);
@@ -4022,12 +4010,10 @@ rwnx_cfg80211_remain_on_channel_(struct wiphy *wiphy, struct wireless_dev *wdev,
 			spin_unlock_bh(&rwnx_hw->cb_lock);
 			rwnx_hw->is_p2p_alive = 1;
 #ifndef CONFIG_USE_P2P0
-			mod_timer(&rwnx_hw->p2p_alive_timer, jiffies + msecs_to_jiffies(1000));
 			atomic_set(&rwnx_hw->p2p_alive_timer_count, 0);
 #endif
 		} else {
 #ifndef CONFIG_USE_P2P0
-			mod_timer(&rwnx_hw->p2p_alive_timer, jiffies + msecs_to_jiffies(1000));
 			atomic_set(&rwnx_hw->p2p_alive_timer_count, 0);
 #endif
 		}
@@ -5665,12 +5651,8 @@ static void rwnx_reg_notifier(struct wiphy *wiphy,
 		}
 #endif
 
-		regulatory_hint(wiphy, alpha2);
 		memcpy(rwnx_hw->last_alpha2, request->alpha2, 2);
 		rwnx_hw->last_time = now;
-
-		if (testmode == 0)
-			rwnx_send_me_chan_config_req(rwnx_hw, &request->alpha2[0]);
 	}
 
 	// For now trust all initiator

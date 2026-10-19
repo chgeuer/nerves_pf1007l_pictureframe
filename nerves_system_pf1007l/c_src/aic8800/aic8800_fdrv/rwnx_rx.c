@@ -524,19 +524,7 @@ static void rwnx_rx_data_skb_forward(struct rwnx_hw *rwnx_hw, struct rwnx_vif *r
         netif_receive_skb(cur_skb);
         local_bh_enable();
 #else
-        if (in_interrupt()) {
-            netif_rx(cur_skb);
-        } else {
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
-            netif_rx_ni(cur_skb);
-#else
-            ulong flags;
-            netif_rx(cur_skb);
-            local_irq_save(flags);
-            RAISE_RX_SOFTIRQ();
-            local_irq_restore(flags);
-#endif
-        }
+        netif_rx(cur_skb);
 #endif /* CONFIG_RX_NETIF_RECV_SKB */
 
         REG_SW_CLEAR_PROFILING(rwnx_hw, SW_PROF_IEEE80211RX);
@@ -699,23 +687,7 @@ static bool rwnx_rx_data_skb(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_vif,
 			netif_receive_skb(rx_skb);
             local_bh_enable();
 			#else
-			if (in_interrupt()) {
-				netif_rx(rx_skb);
-			} else {
-			/*
-			* If the receive is not processed inside an ISR, the softirqd must be woken explicitly to service the NET_RX_SOFTIRQ.
-			* * In 2.6 kernels, this is handledby netif_rx_ni(), but in earlier kernels, we need to do it manually.
-			*/
-			#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
-				netif_rx_ni(rx_skb);
-			#else
-				ulong flags;
-				netif_rx(rx_skb);
-				local_irq_save(flags);
-				RAISE_RX_SOFTIRQ();
-				local_irq_restore(flags);
-			#endif
-			}
+			netif_rx(rx_skb);
 			#endif
             REG_SW_CLEAR_PROFILING(rwnx_hw, SW_PROF_IEEE80211RX);
 
@@ -1606,6 +1578,8 @@ struct reord_ctrl_info *reord_init_sta(struct aicwf_rx_priv *rx_priv, const u8 *
 
 int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u8 tid)
 {
+	return 0;
+#if 0
 	struct reord_ctrl_info *reord_info;
 	struct reord_ctrl *preorder_ctrl;
 	struct rwnx_vif *rwnx_vif = (struct rwnx_vif *)rx_priv->rwnx_vif;
@@ -1643,7 +1617,7 @@ int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u8 tid)
 
 	if (preorder_ctrl->enable == false)
 		return 0;
-	spin_lock_irqsave(&preorder_ctrl->reord_list_lock, flags);
+	spin_lock_bh(&preorder_ctrl->reord_list_lock);
 	phead = &preorder_ctrl->reord_list;
 	while (1) {
 		if (list_empty(phead)) {
@@ -1657,7 +1631,7 @@ int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u8 tid)
 
 	AICWFDBG(LOGINFO, "flush:tid=%d", tid);
 	preorder_ctrl->enable = false;
-	spin_unlock_irqrestore(&preorder_ctrl->reord_list_lock, flags);
+	spin_unlock_bh(&preorder_ctrl->reord_list_lock);
 	if (timer_pending(&preorder_ctrl->reord_timer))
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(6, 15, 0)
 		ret = timer_delete_sync(&preorder_ctrl->reord_timer);
@@ -1667,13 +1641,13 @@ int reord_flush_tid(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u8 tid)
 	cancel_work_sync(&preorder_ctrl->reord_timer_work);
 
 	return 0;
+#endif
 }
 
 
 void reord_deinit_sta(struct aicwf_rx_priv *rx_priv, struct reord_ctrl_info *reord_info)
 {
 	u8 i = 0;
-	unsigned long flags;
 	struct reord_ctrl *preorder_ctrl = NULL;
 	int ret;
 
@@ -1696,7 +1670,7 @@ void reord_deinit_sta(struct aicwf_rx_priv *rx_priv, struct reord_ctrl_info *reo
 			}
 			cancel_work_sync(&preorder_ctrl->reord_timer_work);
 		}
-		spin_lock_irqsave(&preorder_ctrl->reord_list_lock, flags);
+		spin_lock_bh(&preorder_ctrl->reord_list_lock);
 		list_for_each_entry_safe(req, next, &preorder_ctrl->reord_list, reord_pending_list) {
 			list_del_init(&req->reord_pending_list);
 			if (req->pkt != NULL)
@@ -1704,7 +1678,7 @@ void reord_deinit_sta(struct aicwf_rx_priv *rx_priv, struct reord_ctrl_info *reo
 			req->pkt = NULL;
 			reord_rxframe_free(&rx_priv->freeq_lock, &rx_priv->rxframes_freequeue, &req->rxframe_list);
 		}
-		spin_unlock_irqrestore(&preorder_ctrl->reord_list_lock, flags);
+		spin_unlock_bh(&preorder_ctrl->reord_list_lock);
 
 	}
 	spin_lock_bh(&rx_priv->stas_reord_lock);
@@ -1800,23 +1774,7 @@ int reord_single_frame_ind(struct aicwf_rx_priv *rx_priv, struct recv_msdu *prfr
     	netif_receive_skb(rx_skb);
     	local_bh_enable();
 #else
-        if (in_interrupt()) {
-            netif_rx(rx_skb);
-        } else {
-            /*
-             * If the receive is not processed inside an ISR, the softirqd must be woken explicitly to service the NET_RX_SOFTIRQ.
-             * * In 2.6 kernels, this is handledby netif_rx_ni(), but in earlier kernels, we need to do it manually.
-             */
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(2, 6, 0)
-            netif_rx_ni(rx_skb);
-#else
-            ulong flags;
-            netif_rx(rx_skb);
-            local_irq_save(flags);
-            RAISE_RX_SOFTIRQ();
-            local_irq_restore(flags);
-#endif
-        }
+        netif_rx(rx_skb);
 #endif /* CONFIG_RX_NETIF_RECV_SKB */
     }
 
@@ -1971,7 +1929,7 @@ int reord_process_unit(struct aicwf_rx_priv *rx_priv, struct sk_buff *skb, u16 s
 	preorder_ctrl = pframe->preorder_ctrl;
 	pframe->is_amsdu = is_amsdu;
 
-	if (ntohs(eh->h_proto) == ETH_P_PAE)
+	if (1 || ntohs(eh->h_proto) == ETH_P_PAE)
 		return reord_single_frame_ind(rx_priv, pframe);
 
 	if ((rwnx_vif->wdev.iftype == NL80211_IFTYPE_STATION) || (rwnx_vif->wdev.iftype == NL80211_IFTYPE_P2P_CLIENT))
@@ -2194,9 +2152,15 @@ void rwnx_rxdata_process_amsdu(struct rwnx_hw *rwnx_hw, struct sk_buff *skb, u8 
         sub_skb = NULL;
         while (skb->len > 16) {
             sublen = (skb->data[12]<<8)|(skb->data[13]);
-            if (skb->len > (sublen+14))
+            if (sublen < 6 || sublen > 2304) {
+                printk("amsdu invalid sublen:%u\n", sublen);
+                break;
+            }
+            if (skb->len > (sublen+14)) {
                 len_alligned = roundup(sublen + 14, 4);
-            else if (skb->len == (sublen+14))
+                if (len_alligned > skb->len)
+                    len_alligned = skb->len;
+            } else if (skb->len == (sublen+14))
                 len_alligned = sublen+14;
             else {
                 printk("accroding to amsdu: this will not happen\n");
@@ -2634,14 +2598,14 @@ check_len_update:
 						spin_unlock_bh(&rwnx_hw->defrag_lock);
 						return 0;
 					} else {
-						defrag_info = kzalloc(sizeof(struct defrag_ctrl_info), GFP_KERNEL);
+						defrag_info = kzalloc(sizeof(struct defrag_ctrl_info), GFP_ATOMIC);
 						if (defrag_info == NULL) {
 							printk("no defrag_ctrl_info\r\n");
 							dev_kfree_skb(skb);
 							spin_unlock_bh(&rwnx_hw->defrag_lock);
 							return 0;
 						}
-						defrag_info->skb = __dev_alloc_skb(2000, GFP_KERNEL);
+						defrag_info->skb = __dev_alloc_skb(2000, GFP_ATOMIC);
 						if (defrag_info->skb == NULL) {
 							printk("no fragment skb\r\n");
 							dev_kfree_skb(skb);
@@ -2738,6 +2702,10 @@ check_len_update:
 			}
 
 			if (!is_frag && !is_amsdu) {
+				if (skb->len < pull_len || skb_headroom(skb) + pull_len < 14) {
+					dev_kfree_skb(skb);
+					goto end;
+				}
 				skb_pull(skb, pull_len);
 				skb_push(skb, 14);
 				memcpy(skb->data, ra, MAC_ADDR_LEN);

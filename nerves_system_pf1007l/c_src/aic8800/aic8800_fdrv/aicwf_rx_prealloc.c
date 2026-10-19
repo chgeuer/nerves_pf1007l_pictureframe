@@ -8,7 +8,7 @@
 #ifdef CONFIG_PREALLOC_RX_SKB
 struct aicwf_rx_buff_list aic_rx_buff_list;
 
-int aic_rxbuff_num_max = 30;
+int aic_rxbuff_num_max = 128;
 
 int aic_rxbuff_size = (64 * 512);
 

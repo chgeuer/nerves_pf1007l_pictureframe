@@ -3940,7 +3940,6 @@ int rwnx_send_scanu_req(struct rwnx_hw *rwnx_hw, struct rwnx_vif *rwnx_vif,
 			}
 			rwnx_hw->is_p2p_alive = 1;
 #ifndef CONFIG_USE_P2P0
-			mod_timer(&rwnx_hw->p2p_alive_timer, jiffies + msecs_to_jiffies(1000));
 			atomic_set(&rwnx_hw->p2p_alive_timer_count, 0);
 #endif
 			AICWFDBG(LOGINFO, "p2p scan start\n");

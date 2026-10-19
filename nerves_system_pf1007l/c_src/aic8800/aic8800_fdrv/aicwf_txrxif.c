@@ -248,14 +248,12 @@ static bool aicwf_another_ptk_1(struct rx_buff *buffer)
     u8 *read = buffer->read;
     u16 aggr_len = 0;
 
-    BUG_ON((read - buffer->start)%4 != 0);
-
-    if(read == NULL || read >= buffer->end) {
+    if(read == NULL || read + 4 > buffer->end || ((read - buffer->start) % 4 != 0)) {
         return false;
     }
 
     aggr_len = (*read | (*(read + 1) << 8));
-    if(aggr_len == 0) {
+    if(aggr_len == 0 || aggr_len > 16384) {
         return false;
     }
 
@@ -264,15 +262,13 @@ static bool aicwf_another_ptk_1(struct rx_buff *buffer)
 #else
 static bool aicwf_another_ptk(struct sk_buff *skb)
 {
-	u8 *data;
 	u16 aggr_len = 0;
 
-	if (skb->data == NULL || skb->len == 0) {
+	if (skb == NULL || skb->data == NULL || skb->len < 4) {
 		return false;
 	}
-	data = skb->data;
 	aggr_len = (*skb->data | (*(skb->data + 1) << 8));
-	if (aggr_len == 0) {
+	if (aggr_len == 0 || aggr_len > 16384) {
 		return false;
 	}
 
@@ -321,6 +317,11 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
 				else
 					adjust_len = aggr_len;
 
+				if (pkt_len > 16384 || adjust_len == 0 || buffer->read + adjust_len > buffer->end) {
+					txrx_err("bad rx data pkt_len=%u adjust_len=%u\n", pkt_len, adjust_len);
+					break;
+				}
+
 				skb_inblock = __dev_alloc_skb(aggr_len + CCMP_OR_WEP_INFO, GFP_KERNEL);
 				if (skb_inblock == NULL) {
 					txrx_err("no more space! skip\n");
@@ -341,10 +342,16 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
 				else
 					adjust_len = aggr_len;
 
+				if (pkt_len > 16384 || adjust_len == 0 || buffer->read + adjust_len + 4 > buffer->end) {
+					txrx_err("bad rx cfg pkt_len=%u adjust_len=%u\n", pkt_len, adjust_len);
+					break;
+				}
+
 				msg = kmalloc(aggr_len+4, GFP_KERNEL);
 				if (msg == NULL) {
 					txrx_err("no more space for msg!\n");
 					aicwf_prealloc_rxbuff_free(buffer, &rx_priv->rxbuff_lock);
+					atomic_dec(&rx_priv->rx_cnt);
 					return -EBADE;
 				}
 
@@ -387,12 +394,21 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
 			pkt_len = (*skb->data | (*(skb->data + 1) << 8));
 
 			if ((skb->data[2] & SDIO_TYPE_CFG) != SDIO_TYPE_CFG) { // type : data
+				if (pkt_len > 16384) {
+					txrx_err("bad rx skb data pkt_len=%u skb_len=%u\n", pkt_len, skb->len);
+					break;
+				}
 				aggr_len = pkt_len + RX_HWHRD_LEN;
 
 				if (aggr_len & (RX_ALIGNMENT - 1))
 					adjust_len = roundup(aggr_len, RX_ALIGNMENT);
 				else
 					adjust_len = aggr_len;
+
+				if (adjust_len == 0 || adjust_len > skb->len) {
+					txrx_err("bad rx skb data pkt_len=%u adjust_len=%u skb_len=%u\n", pkt_len, adjust_len, skb->len);
+					break;
+				}
 
 				skb_inblock = __dev_alloc_skb(aggr_len + CCMP_OR_WEP_INFO, GFP_KERNEL);
 				if (skb_inblock == NULL) {
@@ -407,6 +423,10 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
 				skb_pull(skb, adjust_len);
 			} else {
 				//  type : config
+				if (pkt_len > 16384) {
+					txrx_err("bad rx skb cfg pkt_len=%u skb_len=%u\n", pkt_len, skb->len);
+					break;
+				}
 				aggr_len = pkt_len;
 
 				if (aggr_len & (RX_ALIGNMENT - 1))
@@ -414,10 +434,16 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
 				else
 					adjust_len = aggr_len;
 
+				if (adjust_len == 0 || (u32)aggr_len + 4 > skb->len) {
+					txrx_err("bad rx skb cfg pkt_len=%u adjust_len=%u skb_len=%u\n", pkt_len, adjust_len, skb->len);
+					break;
+				}
+
 				msg = kmalloc(aggr_len+4, GFP_KERNEL);
 				if (msg == NULL) {
 					txrx_err("no more space for msg!\n");
 					aicwf_dev_skb_free(skb);
+					atomic_dec(&rx_priv->rx_cnt);
 					return -EBADE;
 				}
 
@@ -431,8 +457,10 @@ int aicwf_process_rxframes(struct aicwf_rx_priv *rx_priv)
 				if ((*(msg + 2) & 0x7f) == SDIO_TYPE_CFG_PRINT)
 					rwnx_rx_handle_print(rx_priv->sdiodev->rwnx_hw, msg + 4, aggr_len);
 
-				skb_pull(skb, adjust_len+4);
 				kfree(msg);
+				if ((u32)adjust_len + 4 >= skb->len)
+					break;
+				skb_pull(skb, adjust_len+4);
 			}
 		}
 

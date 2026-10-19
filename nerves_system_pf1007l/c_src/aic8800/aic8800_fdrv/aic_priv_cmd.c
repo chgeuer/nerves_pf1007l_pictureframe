@@ -12,6 +12,7 @@
 
 #include <linux/netdevice.h>
 #include <linux/ctype.h>
+#include <linux/vmalloc.h>
 #include "rwnx_defs.h"
 #include "rwnx_msg_tx.h"
 #include "rwnx_debugfs.h"

@@ -1439,8 +1439,7 @@ netdev_tx_t rwnx_start_xmit(struct sk_buff *skb, struct net_device *dev)
 	max_headroom = sizeof(struct rwnx_txhdr);
 
 	/* check whether the current skb can be used */
-	if (skb_shared(skb) || (skb_headroom(skb) < max_headroom) ||
-		(skb_cloned(skb) && (dev->priv_flags & IFF_BRIDGE_PORT))) {
+	if (skb_shared(skb) || skb_cloned(skb) || (skb_headroom(skb) < max_headroom)) {
 		struct sk_buff *newskb = skb_copy_expand(skb, max_headroom, 0,
 												 GFP_ATOMIC);
 		if (unlikely(newskb == NULL))
