@@ -40,9 +40,13 @@ defmodule Pf1007lScenic.Schedule do
     end
   end
 
+  def now_local do
+    # Shift UTC by +2h (CEST/CET wall-clock time in Germany)
+    DateTime.utc_now() |> DateTime.add(2 * 3600, :second) |> DateTime.to_naive()
+  end
+
   def today do
-    # Shift UTC by +2h (CEST/CET approximation if TZ db isn't configured)
-    DateTime.utc_now() |> DateTime.add(2 * 3600, :second) |> DateTime.to_date()
+    NaiveDateTime.to_date(now_local())
   end
 
   def search_schools(query) when is_binary(query) do

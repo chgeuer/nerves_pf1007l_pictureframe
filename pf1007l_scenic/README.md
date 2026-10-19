@@ -8,6 +8,10 @@ Interactive [Scenic](https://github.com/ScenicFramework/scenic) UI firmware appl
 - **Calibrated Multi-Touch Input**: Uses `scenic_driver_local` (`evdev` input backend on `silead_ts`) with a `{{800 / 640, 0.0, 0.0}, {0.0, 1280 / 960, 0.0}}` affine calibration matrix and mailbox `:cursor_pos` coalescing for low-latency touch/drag tracking.
 - **USB Gadget Networking & SSH**: Exposes `usb0` (`172.31.101.185`) via `nerves_pack` / `vintage_net_direct` for instant `ssh 172.31.101.185` IEx access and `mix upload 172.31.101.185` OTA updates.
 
+## Fonts
+
+The UI uses [Berkeley Mono](https://usgraphics.com/products/berkeley-mono), a commercially licensed typeface that is not part of this repository. Copy your licensed `BerkeleyMono-Regular.ttf` and `BerkeleyMono-Bold.ttf` into `assets/fonts/` before building (see `Pf1007lScenic.Assets`).
+
 ## Quick Start
 
 ```bash

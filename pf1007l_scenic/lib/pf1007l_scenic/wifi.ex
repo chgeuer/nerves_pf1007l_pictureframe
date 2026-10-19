@@ -9,6 +9,7 @@ defmodule Pf1007lScenic.WiFi do
 
   def subscribe do
     if Code.ensure_loaded?(VintageNet) do
+      _ = Application.ensure_all_started(:vintage_net)
       apply(VintageNet, :subscribe, [["interface", @ifname]])
     else
       :ok
@@ -19,6 +20,7 @@ defmodule Pf1007lScenic.WiFi do
 
   def scan do
     if Code.ensure_loaded?(VintageNet) do
+      _ = Application.ensure_all_started(:vintage_net)
       apply(VintageNet, :scan, [@ifname])
     else
       :ok
@@ -33,12 +35,20 @@ defmodule Pf1007lScenic.WiFi do
 
     cond do
       ssid == "" ->
-        {:error, :empty_ssid}
+        {:error, "SSID cannot be empty."}
+
+      password != "" and String.length(password) < 8 ->
+        {:error, "WPA password must be at least 8 characters."}
+
+      password != "" and String.length(password) > 63 ->
+        {:error, "WPA password must be at most 63 characters."}
 
       not Code.ensure_loaded?(VintageNetWiFi) ->
-        {:error, :vintage_net_unavailable}
+        {:error, "VintageNetWiFi is not available."}
 
       password == "" ->
+        _ = Application.ensure_all_started(:vintage_net)
+
         config = %{
           type: VintageNetWiFi,
           vintage_net_wifi: %{
@@ -50,10 +60,18 @@ defmodule Pf1007lScenic.WiFi do
         apply(VintageNet, :configure, [@ifname, config])
 
       true ->
+        _ = Application.ensure_all_started(:vintage_net)
         apply(VintageNetWiFi, :quick_configure, [ssid, password])
     end
   rescue
-    e -> {:error, Exception.message(e)}
+    e ->
+      msg =
+        e
+        |> Exception.message()
+        |> String.replace(~r/\s+/, " ")
+        |> String.trim()
+
+      {:error, msg}
   end
 
   def status do

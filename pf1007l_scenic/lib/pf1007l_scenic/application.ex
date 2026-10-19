@@ -12,7 +12,6 @@ defmodule Pf1007lScenic.Application do
     if @target != :host do
       init_hardware()
       spawn(fn -> init_wifi_driver() end)
-      spawn(fn -> write_boot_diagnostics() end)
     end
 
     children =
@@ -48,44 +47,25 @@ defmodule Pf1007lScenic.Application do
 
   defp init_wifi_driver do
     if File.exists?("/lib/modules/6.12.34/extra/aic8800_bsp.ko") do
-      _ = System.cmd("/sbin/modprobe", ["aic8800_bsp"])
-      Process.sleep(300)
-      _ = System.cmd("/sbin/modprobe", ["aic8800_fdrv"])
+      # Let usb0, sshd, and Scenic finish starting first
+      Process.sleep(4_000)
+
+      unless File.exists?("/sys/class/net/wlan0") do
+        # Hardware power-cycle AIC8800DC via sunxi-mmc1 pwrseq (PL5 chip_en + PL6 wl_reg_on)
+        # while no aic8800 module is loaded, so warm OTA reboots always reset the chip
+        # cleanly back to its SDIO ROM bootloader (0xC8A1:0xC08D) without touching rtnl_lock.
+        if File.exists?("/sys/bus/platform/drivers/sunxi-mmc/1c10000.mmc") do
+          _ = File.write("/sys/bus/platform/drivers/sunxi-mmc/unbind", "1c10000.mmc")
+          Process.sleep(300)
+          _ = File.write("/sys/bus/platform/drivers/sunxi-mmc/bind", "1c10000.mmc")
+          Process.sleep(800)
+        end
+
+        _ = System.cmd("/sbin/modprobe", ["aic8800_bsp"])
+        Process.sleep(300)
+        _ = System.cmd("/sbin/modprobe", ["aic8800_fdrv"])
+      end
     end
-  rescue
-    _ -> :ok
-  end
-
-  defp write_boot_diagnostics do
-    File.mkdir_p("/tmp/boot_mnt")
-    :os.cmd(~c"mount -t vfat /dev/mmcblk0p1 /tmp/boot_mnt")
-
-    dump = fn label ->
-      dmesg = :os.cmd(~c"dmesg") |> to_string()
-      drm = :os.cmd(~c"head -n 20 /sys/class/drm/*/status /sys/class/drm/*/enabled /sys/class/drm/*/modes /sys/class/backlight/*/* 2>&1") |> to_string()
-      input = :os.cmd(~c"cat /proc/bus/input/devices 2>&1") |> to_string()
-      udc = :os.cmd(~c"head -n 20 /sys/class/udc/*/* /sys/kernel/config/usb_gadget/*/* 2>&1") |> to_string()
-
-      content = """
-      === PF1007L NERVES FLIGHT RECORDER (#{label}) ===
-      === DRM & BACKLIGHT ===
-      #{drm}
-      === INPUT DEVICES ===
-      #{input}
-      === USB GADGET / UDC ===
-      #{udc}
-      === DMESG ===
-      #{dmesg}
-      """
-
-      File.write("/tmp/boot_mnt/boot-diag.txt", content)
-      :os.cmd(~c"sync")
-    end
-
-    dump.("initial")
-    Process.sleep(5_000)
-    dump.("after_5s")
-    :os.cmd(~c"umount /tmp/boot_mnt")
   rescue
     _ -> :ok
   end

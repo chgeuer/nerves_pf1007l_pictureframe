@@ -28,8 +28,8 @@ defmodule Pf1007lScenic.Accelerometer do
   catch
     :exit, _ ->
       %{
-        orientation: :landscape,
-        sensor_orientation: :landscape,
+        orientation: :portrait,
+        sensor_orientation: :portrait,
         raw: {0, 0, 0},
         auto_rotate?: true,
         offset: 0
@@ -55,10 +55,10 @@ defmodule Pf1007lScenic.Accelerometer do
     state = %{
       port: open_accel_port(),
       raw: {576, 0, 868},
-      sensor_orientation: :landscape,
+      sensor_orientation: :portrait,
       auto_rotate?: Map.get(prefs, :auto_rotate?, true),
       offset: Map.get(prefs, :offset, 0),
-      locked_orientation: Map.get(prefs, :locked_orientation, :landscape),
+      locked_orientation: Map.get(prefs, :locked_orientation, :portrait),
       subscribers: MapSet.new()
     }
 
@@ -166,10 +166,10 @@ defmodule Pf1007lScenic.Accelerometer do
         current
 
       ax > ay + 120 ->
-        if x >= 0, do: :landscape, else: :landscape_inverted
+        if x >= 0, do: :portrait, else: :portrait_inverted
 
       ay > ax + 120 ->
-        if y >= 0, do: :portrait_inverted, else: :portrait
+        if y < 0, do: :landscape, else: :landscape_inverted
 
       true ->
         current

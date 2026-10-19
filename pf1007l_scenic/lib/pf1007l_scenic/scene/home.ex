@@ -17,16 +17,13 @@ defmodule Pf1007lScenic.Scene.Home do
   alias Pf1007lScenic.{Accelerometer, Schedule, TimetableGrid, WiFi}
 
   @bg {11, 17, 32}
-  @panel {22, 32, 56}
   @panel_alt {30, 43, 72}
   @border {51, 69, 107}
   @text_main {241, 245, 249}
   @text_muted {148, 163, 184}
   @accent {56, 189, 248}
   @green {16, 185, 129}
-  @amber {245, 158, 11}
   @red {239, 68, 68}
-  @purple {139, 92, 246}
 
   @kb_rows_lower [
     ["1", "2", "3", "4", "5", "6", "7", "8", "9", "0", "-", "_"],
@@ -71,11 +68,12 @@ defmodule Pf1007lScenic.Scene.Home do
 
     state = %{
       view: :timetable,
+      theme: :light,
       orientation: accel.orientation,
       auto_rotate?: accel.auto_rotate?,
       accel_raw: accel.raw,
       brightness: read_brightness(),
-      touch_pos: {640, 400},
+      touch_pos: {400, 640},
       hitboxes: [],
       # Wi-Fi UI state
       wifi: wifi,
@@ -185,9 +183,10 @@ defmodule Pf1007lScenic.Scene.Home do
     wifi = WiFi.status()
     accel = Accelerometer.state()
     today = Schedule.today()
+    date_jumped? = abs(Date.diff(scene.assigns.state.date, today)) > 30
 
     date =
-      if abs(Date.diff(scene.assigns.state.date, today)) > 30 do
+      if date_jumped? do
         today
       else
         scene.assigns.state.date
@@ -202,9 +201,16 @@ defmodule Pf1007lScenic.Scene.Home do
         accel_raw: accel.raw
     }
 
-    if not Schedule.logged_in?() and Schedule.saved_login?() and wifi.connection in [:internet, :lan] do
-      Task.start(fn -> _ = Schedule.resume() end)
-      send(self(), :sync_untis)
+    cond do
+      not Schedule.logged_in?() and Schedule.saved_login?() and wifi.connection in [:internet, :lan] ->
+        Task.start(fn -> _ = Schedule.resume() end)
+        send(self(), :sync_untis)
+
+      (date_jumped? or state.timetable == nil) and Schedule.logged_in?() and wifi.connection in [:internet, :lan] ->
+        send(self(), :sync_untis)
+
+      true ->
+        :ok
     end
 
     {:noreply, render_scene(scene, state)}
@@ -215,8 +221,12 @@ defmodule Pf1007lScenic.Scene.Home do
     me = self()
 
     if Schedule.logged_in?() do
-      _ = Schedule.subscribe(me)
-      send(me, :load_timetable)
+      Task.start(fn ->
+        _ = Schedule.refresh()
+        _ = Schedule.subscribe(me)
+        send(me, :load_timetable)
+      end)
+
       {:noreply, scene}
     else
       if Schedule.saved_login?() do
@@ -338,6 +348,22 @@ defmodule Pf1007lScenic.Scene.Home do
     %{state | view: view, active_field: nil}
   end
 
+  defp handle_action(:toggle_theme, state) do
+    next = if state.theme == :light, do: :dark, else: :light
+    %{state | theme: next}
+  end
+
+  defp handle_action(:cycle_target, state) do
+    if length(state.targets) > 1 do
+      next_idx = rem(state.selected_target_idx + 1, length(state.targets))
+      state = %{state | view: :timetable, selected_target_idx: next_idx, selected_period: nil}
+      send(self(), :load_timetable)
+      state
+    else
+      %{state | view: :timetable, active_field: nil}
+    end
+  end
+
   defp handle_action(:rotate_cw, state) do
     {:ok, accel} = Accelerometer.rotate_cw()
     %{state | orientation: accel.orientation, auto_rotate?: accel.auto_rotate?, accel_raw: accel.raw}
@@ -421,8 +447,11 @@ defmodule Pf1007lScenic.Scene.Home do
             wifi_message: "Connecting to '#{state.wifi_ssid}' (credentials saved to /root)..."
         }
 
+      {:error, err} when is_binary(err) ->
+        %{state | wifi_message: "Wi-Fi error: #{err}"}
+
       {:error, err} ->
-        %{state | wifi_message: "Failed to configure Wi-Fi: #{inspect(err)}"}
+        %{state | wifi_message: "Wi-Fi error: #{inspect(err)}"}
     end
   end
 
@@ -558,8 +587,8 @@ defmodule Pf1007lScenic.Scene.Home do
 
   defp screen_to_logical({sx, sy}, :portrait), do: {sx, sy}
   defp screen_to_logical({sx, sy}, :portrait_inverted), do: {800.0 - sx, 1280.0 - sy}
-  defp screen_to_logical({sx, sy}, :landscape), do: {sy, 800.0 - sx}
-  defp screen_to_logical({sx, sy}, :landscape_inverted), do: {1280.0 - sy, sx}
+  defp screen_to_logical({sx, sy}, :landscape), do: {sy, max(0.0, 800.0 - sx - 18.0)}
+  defp screen_to_logical({sx, sy}, :landscape_inverted), do: {1280.0 - sy, max(0.0, sx - 18.0)}
 
   defp find_hitbox(hitboxes, lx, ly) do
     Enum.find_value(hitboxes, fn {action, x, y, w, h} ->
@@ -567,20 +596,79 @@ defmodule Pf1007lScenic.Scene.Home do
     end)
   end
 
-  # --- Rendering ---
+  # --- Rendering (Untis Mobile 6.7.1 Specification) ---
+
+  defp palette(:light) do
+    %{
+      top_bar_bg: {255, 255, 255},
+      top_bar_title: {103, 116, 126},
+      top_bar_sub: {94, 115, 130},
+      header_bg: {220, 223, 229},
+      canvas_bg: {243, 245, 247},
+      divider: {191, 200, 207},
+      text_primary: {16, 23, 29},
+      text_secondary: {94, 115, 130},
+      untis_orange: {255, 96, 51},
+      btn_bg: {243, 245, 247},
+      btn_border: {191, 200, 207},
+      btn_text: {16, 23, 29},
+      regular_bg: {255, 255, 255},
+      regular_past_bg: {243, 245, 247},
+      regular_border: {220, 223, 229},
+      changed_bg: {228, 255, 243},
+      changed_border: {0, 146, 109},
+      changed_pill: {0, 125, 100},
+      cancelled_bg: {255, 243, 243},
+      cancelled_border: {223, 0, 71},
+      cancelled_pill: {223, 0, 71},
+      exam_bg: {255, 247, 217},
+      exam_border: {159, 83, 45},
+      exam_pill: {197, 125, 0}
+    }
+  end
+
+  defp palette(:dark) do
+    %{
+      top_bar_bg: {0, 0, 0},
+      top_bar_title: {138, 150, 161},
+      top_bar_sub: {191, 200, 207},
+      header_bg: {22, 22, 22},
+      canvas_bg: {24, 32, 38},
+      divider: {94, 115, 130},
+      text_primary: {243, 245, 247},
+      text_secondary: {191, 200, 207},
+      untis_orange: {255, 96, 51},
+      btn_bg: {37, 46, 56},
+      btn_border: {94, 115, 130},
+      btn_text: {243, 245, 247},
+      regular_bg: {37, 46, 56},
+      regular_past_bg: {24, 32, 38},
+      regular_border: {50, 61, 69},
+      changed_bg: {21, 46, 40},
+      changed_border: {0, 146, 109},
+      changed_pill: {0, 146, 109},
+      cancelled_bg: {45, 23, 36},
+      cancelled_border: {223, 0, 71},
+      cancelled_pill: {250, 24, 90},
+      exam_bg: {43, 37, 24},
+      exam_border: {197, 125, 0},
+      exam_pill: {229, 151, 0}
+    }
+  end
 
   defp render_scene(scene, state) do
     {w, h} = logical_size(state.orientation)
+    pal = palette(state.theme)
 
     {inner_fn, hitboxes} =
-      build_ui({w, h}, state)
+      build_ui({w, h}, state, pal)
 
     graph =
-      Graph.build(font: :roboto, font_size: 20)
+      Graph.build(font: :berkeley_mono, font_size: 20)
       |> group(
         fn g ->
           g
-          |> rect({w, h}, fill: @bg)
+          |> rect({w, h}, fill: pal.canvas_bg)
           |> inner_fn.()
         end,
         rot_group_opts(state.orientation)
@@ -593,12 +681,12 @@ defmodule Pf1007lScenic.Scene.Home do
     |> push_graph(graph)
   end
 
-  defp build_ui({w, h}, state) do
-    {top_fn, top_hb} = build_top_bar(w, state)
+  defp build_ui({w, h}, state, pal) do
+    {top_fn, top_hb} = build_top_bar(w, state, pal)
 
     {body_fn, body_hb} =
       case state.view do
-        :timetable -> build_timetable_view({w, h}, state)
+        :timetable -> build_timetable_view({w, h}, state, pal)
         :wifi -> build_wifi_view({w, h}, state)
         :untis -> build_untis_view({w, h}, state)
       end
@@ -610,7 +698,6 @@ defmodule Pf1007lScenic.Scene.Home do
         {fn g -> g end, []}
       end
 
-    # Put keyboard hitboxes first so when open, keyboard keys take priority
     hitboxes = kb_hb ++ top_hb ++ body_hb
 
     ui_fn = fn g ->
@@ -623,209 +710,306 @@ defmodule Pf1007lScenic.Scene.Home do
     {ui_fn, hitboxes}
   end
 
-  defp build_top_bar(w, state) do
+  defp build_top_bar(w, state, pal) do
     wifi_ok? = state.wifi.connection in [:internet, :lan]
-    wifi_color = if wifi_ok?, do: @green, else: @amber
-
-    wifi_label =
-      cond do
-        wifi_ok? and is_binary(state.wifi.ssid) -> "Wi-Fi: #{truncate(state.wifi.ssid, 11)}"
-        wifi_ok? -> "Wi-Fi: Online"
-        true -> "Wi-Fi: Setup"
-      end
-
-    untis_color = if Schedule.logged_in?(), do: @accent, else: @amber
-    untis_label = if Schedule.logged_in?(), do: "Untis ✓", else: "Untis Login"
+    wifi_label = if wifi_ok?, do: "Wi-Fi", else: "Wi-Fi!"
+    untis_label = if Schedule.logged_in?(), do: "Untis", else: "Login"
     auto_label = if state.auto_rotate?, do: "AUTO", else: "LOCK"
-    auto_color = if state.auto_rotate?, do: @green, else: @panel_alt
+    theme_label = if state.theme == :light, do: "Dark", else: "Hell"
+
+    target_title =
+      case Enum.at(state.targets, state.selected_target_idx) do
+        {name, _} -> name
+        _ -> if state.untis_school != "", do: state.untis_school, else: "Stundenplan"
+      end
 
     buttons =
       if w >= 1000 do
         [
-          {{:nav, :timetable}, 16, 12, 165, 52, "Timetable", if(state.view == :timetable, do: @accent, else: @panel_alt)},
-          {:week_prev, 192, 12, 64, 52, "◀", @panel_alt},
-          {:week_today, 262, 12, 92, 52, "Today", @panel_alt},
-          {:week_next, 360, 12, 64, 52, "▶", @panel_alt},
-          {:untis_refresh, 430, 12, 68, 52, "↻", @panel_alt},
-          {{:nav, :wifi}, w - 540, 12, 175, 52, wifi_label, if(state.view == :wifi, do: @accent, else: wifi_color)},
-          {{:nav, :untis}, w - 355, 12, 130, 52, untis_label, if(state.view == :untis, do: @accent, else: untis_color)},
-          {:rotate_cw, w - 215, 12, 62, 52, "⟳", @panel_alt},
-          {:toggle_auto, w - 147, 12, 68, 52, auto_label, auto_color},
-          {:bright_down, w - 73, 12, 30, 52, "-", @panel_alt},
-          {:bright_up, w - 38, 12, 30, 52, "+", @panel_alt}
+          {:week_prev, w - 602, 9, 44, 38, "◀", :neutral},
+          {:week_today, w - 554, 9, 68, 38, "Heute", :orange},
+          {:week_next, w - 482, 9, 44, 38, "▶", :neutral},
+          {:untis_refresh, w - 434, 9, 54, 38, "Sync", :neutral},
+          {{:nav, :wifi}, w - 374, 9, 76, 38, wifi_label, if(wifi_ok?, do: :green, else: :amber)},
+          {{:nav, :untis}, w - 292, 9, 76, 38, untis_label, if(Schedule.logged_in?(), do: :neutral, else: :orange)},
+          {:toggle_theme, w - 210, 9, 54, 38, theme_label, :neutral},
+          {:rotate_cw, w - 150, 9, 46, 38, "90°", :neutral},
+          {:toggle_auto, w - 98, 9, 56, 38, auto_label, if(state.auto_rotate?, do: :green, else: :neutral)},
+          {:bright_down, w - 38, 9, 16, 38, "-", :neutral},
+          {:bright_up, w - 19, 9, 16, 38, "+", :neutral}
         ]
       else
         [
-          {{:nav, :timetable}, 12, 12, 126, 50, "Schedule", if(state.view == :timetable, do: @accent, else: @panel_alt)},
-          {:week_prev, 144, 12, 48, 50, "◀", @panel_alt},
-          {:week_today, 196, 12, 74, 50, "Today", @panel_alt},
-          {:week_next, 274, 12, 48, 50, "▶", @panel_alt},
-          {{:nav, :wifi}, 328, 12, 152, 50, wifi_label, if(state.view == :wifi, do: @accent, else: wifi_color)},
-          {{:nav, :untis}, 486, 12, 114, 50, untis_label, if(state.view == :untis, do: @accent, else: untis_color)},
-          {:rotate_cw, 606, 12, 54, 50, "⟳", @panel_alt},
-          {:toggle_auto, 664, 12, 62, 50, auto_label, auto_color},
-          {:bright_down, 730, 12, 28, 50, "-", @panel_alt},
-          {:bright_up, 762, 12, 28, 50, "+", @panel_alt}
+          {:week_prev, w - 548, 9, 36, 38, "◀", :neutral},
+          {:week_today, w - 508, 9, 58, 38, "Heute", :orange},
+          {:week_next, w - 446, 9, 36, 38, "▶", :neutral},
+          {:untis_refresh, w - 406, 9, 50, 38, "Sync", :neutral},
+          {{:nav, :wifi}, w - 352, 9, 68, 38, wifi_label, if(wifi_ok?, do: :green, else: :amber)},
+          {{:nav, :untis}, w - 280, 9, 68, 38, untis_label, if(Schedule.logged_in?(), do: :neutral, else: :orange)},
+          {:toggle_theme, w - 208, 9, 50, 38, theme_label, :neutral},
+          {:rotate_cw, w - 154, 9, 44, 38, "90°", :neutral},
+          {:toggle_auto, w - 106, 9, 54, 38, auto_label, if(state.auto_rotate?, do: :green, else: :neutral)},
+          {:bright_down, w - 48, 9, 20, 38, "-", :neutral},
+          {:bright_up, w - 24, 9, 20, 38, "+", :neutral}
         ]
       end
 
-    hitboxes = Enum.map(buttons, fn {act, x, y, bw, bh, _lbl, _col} -> {act, x, y, bw, bh} end)
+    title_hb = [{:cycle_target, 8, 4, 240, 48}]
+    hitboxes = title_hb ++ Enum.map(buttons, fn {act, x, y, bw, bh, _lbl, _st} -> {act, x, y, bw, bh} end)
 
     draw_fn = fn g ->
       g =
         g
-        |> rect({w, 76}, fill: @panel)
-        |> line({{0, 76}, {w, 76}}, stroke: {2, @border})
+        |> rect({w, 56}, fill: pal.top_bar_bg)
+        |> line({{0, 56}, {w, 56}}, stroke: {1, pal.divider})
+        |> text(truncate(target_title, if(w >= 1000, do: 28, else: 14)),
+          font: :berkeley_mono_bold,
+          font_size: 19,
+          fill: pal.top_bar_title,
+          translate: {16, 26}
+        )
+        |> text(
+          if(length(state.targets) > 1,
+            do: "Tippen zum Wechseln (#{state.selected_target_idx + 1}/#{length(state.targets)})",
+            else: truncate(state.untis_school, 24)
+          ),
+          font_size: 12,
+          fill: pal.top_bar_sub,
+          translate: {16, 44}
+        )
 
-      Enum.reduce(buttons, g, fn {_act, x, y, bw, bh, lbl, col}, acc ->
-        draw_button(acc, x, y, bw, bh, lbl, col)
+      Enum.reduce(buttons, g, fn {_act, x, y, bw, bh, lbl, style}, acc ->
+        draw_bar_chip(acc, x, y, bw, bh, lbl, style, pal)
       end)
     end
 
     {draw_fn, hitboxes}
   end
 
-  # --- View 1: Student Timetable Grid ---
-
-  defp build_timetable_view({w, h}, state) do
-    # Target selector chips if multiple targets exist
-    {target_btns, target_y_offset} =
-      if length(state.targets) > 1 do
-        btns =
-          state.targets
-          |> Enum.with_index()
-          |> Enum.map(fn {{name, _el}, idx} ->
-            x = 16 + idx * 190
-            col = if idx == state.selected_target_idx, do: @accent, else: @panel_alt
-            {{:select_target, idx}, x, 84, 180, 38, truncate(name, 16), col}
-          end)
-
-        {btns, 46}
-      else
-        {[], 0}
+  defp draw_bar_chip(g, x, y, w, h, label, style, pal) do
+    {bg, border, fg} =
+      case style do
+        :orange -> {pal.untis_orange, pal.untis_orange, {255, 255, 255}}
+        :green -> {{0, 146, 109}, {0, 146, 109}, {255, 255, 255}}
+        :amber -> {{197, 125, 0}, {197, 125, 0}, {255, 255, 255}}
+        _ -> {pal.btn_bg, pal.btn_border, pal.btn_text}
       end
 
-    top_y = 86 + target_y_offset
-    footer_h = 88
-    grid_h = h - top_y - footer_h - 10
+    font_sz = if w <= 22, do: 14, else: 15
+    pad_x = max(4, div(w - String.length(label) * div(font_sz, 2), 2) - 2)
+
+    g
+    |> rrect({w, h, 6}, fill: bg, stroke: {1, border}, translate: {x, y})
+    |> text(label,
+      font_size: font_sz,
+      fill: fg,
+      translate: {x + pad_x, y + div(h, 2) + 5}
+    )
+  end
+
+  # --- View 1: Untis Mobile 6.7.1 Proportional Week Timetable ---
+
+  defp build_timetable_view({w, h}, state, pal) do
+    top_y = 56
+    header_h = 52
+    footer_h = if state.selected_period != nil, do: 68, else: 32
+    body_top = top_y + header_h
+    body_h = h - body_top - footer_h
+    time_col_w = if w >= 1000, do: 64, else: 56
 
     case state.grid do
-      %{days: days, rows: rows} when days != [] and rows != [] ->
+      %{days: days, units: units, day_start_min: day_start_min, day_end_min: day_end_min}
+      when days != [] and units != [] ->
         num_days = length(days)
-        num_rows = length(rows)
-        time_col_w = if w >= 1000, do: 92, else: 74
-        day_col_w = div(w - time_col_w - 24, max(num_days, 1))
-        header_h = 44
-        row_h = max(48, div(grid_h - header_h, max(num_rows, 1)))
-        today = Schedule.today()
+        day_col_w = div(w - time_col_w, max(num_days, 1))
+        usable_h = max(body_h - 20, 100)
+        span_min = max(day_end_min - day_start_min, 60)
+
+        y_at = fn min_val ->
+          clamped = min_val |> max(day_start_min) |> min(day_end_min)
+          body_top + 10 + div((clamped - day_start_min) * usable_h, span_min)
+        end
+
+        now_local = Schedule.now_local()
+        today = NaiveDateTime.to_date(now_local)
+        now_min = now_local.hour * 60 + now_local.minute
 
         period_cards =
-          for {row, r_idx} <- Enum.with_index(rows),
-              {cell_periods, d_idx} <- Enum.with_index(row.cells),
-              cell_periods != [] do
-            cx = 12 + time_col_w + d_idx * day_col_w + 3
-            cy = top_y + header_h + r_idx * row_h + 3
-            cw = day_col_w - 6
-            ch = row_h - 6
-            p = hd(cell_periods)
-            {{:select_period, p}, cx, cy, cw, ch, p, length(cell_periods)}
+          for {day, d_idx} <- Enum.with_index(days),
+              item <- Map.get(day, :layout_periods, []) do
+            col_w = div(day_col_w, max(item.col_count, 1))
+            cx = time_col_w + d_idx * day_col_w + item.col_idx * col_w + 1
+            cw = max(col_w - 2, 16)
+            y1 = y_at.(item.start_min)
+            y2 = y_at.(item.end_min)
+            cy = y1 + 1
+            ch = max(y2 - y1 - 2, 18)
+            past? = NaiveDateTime.compare(item.period.end, now_local) == :lt
+            {{:select_period, item.period}, cx, cy, cw, ch, item, past?}
           end
 
         hitboxes =
-          Enum.map(target_btns, fn {a, x, y, bw, bh, _, _} -> {a, x, y, bw, bh} end) ++
-            Enum.map(period_cards, fn {a, x, y, bw, bh, _, _} -> {a, x, y, bw, bh} end)
+          Enum.map(period_cards, fn {act, x, y, bw, bh, _item, _past?} -> {act, x, y, bw, bh} end)
+
+        first_date = hd(days).date
+        kw_str = "KW #{TimetableGrid.iso_week_number(first_date)}"
+        month_str = TimetableGrid.month_short_de(first_date)
 
         draw_fn = fn g ->
+          # 1. Sticky Weekday Header Row & Left Time Column backgrounds
           g =
-            Enum.reduce(target_btns, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
-              draw_button(acc, x, y, bw, bh, lbl, col, 18)
-            end)
+            g
+            |> rect({w, header_h}, fill: pal.header_bg, translate: {0, top_y})
+            |> rect({time_col_w, body_h}, fill: pal.header_bg, translate: {0, body_top})
+            |> rect({w - time_col_w, body_h}, fill: pal.canvas_bg, translate: {time_col_w, body_top})
+            # Top-left corner cell: "KW <week>" (13sp) + "Apr." (17sp Bold)
+            |> text(kw_str,
+              font_size: 13,
+              fill: pal.text_secondary,
+              translate: {8, top_y + 19}
+            )
+            |> text(month_str,
+              font: :berkeley_mono_bold,
+              font_size: 17,
+              fill: pal.text_secondary,
+              translate: {8, top_y + 41}
+            )
 
-          # Day column headers
+          # 2. Weekday Headers + Vertical Column Grid Dividers
           g =
             days
             |> Enum.with_index()
             |> Enum.reduce(g, fn {day, d_idx}, acc ->
-              dx = 12 + time_col_w + d_idx * day_col_w
+              dx = time_col_w + d_idx * day_col_w
               is_today? = Date.compare(day.date, today) == :eq
-              hdr_col = if is_today?, do: {24, 68, 108}, else: @panel
+              wd_str = TimetableGrid.weekday_short_de(day.date)
+              day_num_str = Integer.to_string(day.date.day)
+
+              wd_col = if is_today?, do: pal.untis_orange, else: pal.text_secondary
+              num_col = if is_today?, do: pal.untis_orange, else: pal.text_primary
+              center_x = dx + div(day_col_w, 2)
 
               acc
-              |> rrect({day_col_w - 4, header_h - 4, 8}, fill: hdr_col, translate: {dx + 2, top_y})
-              |> text(TimetableGrid.day_short(day.date),
-                font_size: if(w >= 1000, do: 20, else: 17),
-                fill: if(is_today?, do: @accent, else: @text_main),
-                translate: {dx + 14, top_y + 28}
+              |> line({{dx, top_y}, {dx, body_top + body_h}}, stroke: {1, pal.divider})
+              |> text(wd_str,
+                font_size: 13,
+                fill: wd_col,
+                translate: {center_x - 10, top_y + 19}
+              )
+              |> text(day_num_str,
+                font: :berkeley_mono_bold,
+                font_size: 18,
+                fill: num_col,
+                translate: {center_x - if(day.date.day >= 10, do: 10, else: 5), top_y + 41}
               )
             end)
 
-          # Lesson slot rows & background cells
+          # Sticky weekday header bottom divider (1dp)
+          g = line(g, {{0, body_top}, {w, body_top}}, stroke: {1, pal.divider})
+
+          # 3. Time-Grid Units (Horizontal Lines, Break Bands & Left Time Labels)
           g =
-            rows
-            |> Enum.with_index()
-            |> Enum.reduce(g, fn {row, r_idx}, acc ->
-              ry = top_y + header_h + r_idx * row_h
-              t_start = TimetableGrid.format_time(row.start)
-              t_end = TimetableGrid.format_time(row.end)
+            Enum.reduce(units, g, fn u, acc ->
+              y1 = y_at.(u.start_min)
+              y2 = y_at.(u.end_min)
+              y_mid = div(y1 + y2, 2)
+              t_start = TimetableGrid.format_time(u.start)
+              t_end = TimetableGrid.format_time(u.end)
 
               acc =
                 acc
-                |> rrect({time_col_w - 4, row_h - 4, 6}, fill: @panel, translate: {12, ry + 2})
+                |> line({{0, y1}, {w, y1}}, stroke: {1, pal.divider})
                 |> text(t_start,
-                  font_size: 16,
-                  fill: @text_main,
-                  translate: {18, ry + 22}
+                  font_size: 12,
+                  fill: pal.text_secondary,
+                  translate: {10, y1 + 13}
                 )
-                |> text(t_end,
-                  font_size: 14,
-                  fill: @text_muted,
-                  translate: {18, ry + 42}
+                |> text(to_string(u.label || ""),
+                  font_size: 15,
+                  fill: pal.text_secondary,
+                  translate: {22, y_mid + 5}
                 )
 
-              Enum.reduce(0..(num_days - 1), acc, fn d_idx, acc2 ->
-                dx = 12 + time_col_w + d_idx * day_col_w
-                rrect(acc2, {day_col_w - 6, row_h - 6, 6}, fill: {17, 25, 44}, translate: {dx + 3, ry + 3})
-              end)
-            end)
-
-          # Holiday overlays
-          g =
-            days
-            |> Enum.with_index()
-            |> Enum.reduce(g, fn {day, d_idx}, acc ->
-              if day.holiday do
-                dx = 12 + time_col_w + d_idx * day_col_w
-                hy = top_y + header_h + 4
-                hh = num_rows * row_h - 8
-
+              if u.show_end? do
                 acc
-                |> rrect({day_col_w - 8, hh, 8}, fill: {28, 42, 68}, translate: {dx + 4, hy})
-                |> text(truncate(day.holiday.long_name || day.holiday.name || "Holiday", 16),
-                  font_size: 18,
-                  fill: @accent,
-                  translate: {dx + 12, hy + 40}
+                |> line({{0, y2}, {w, y2}}, stroke: {1, pal.divider})
+                |> text(t_end,
+                  font_size: 12,
+                  fill: pal.text_secondary,
+                  translate: {10, y2 - 4}
                 )
               else
                 acc
               end
             end)
 
-          # Period cards
+          # 4. Holiday Overlays
           g =
-            Enum.reduce(period_cards, g, fn {_act, cx, cy, cw, ch, p, count}, acc ->
-              draw_period_card(acc, cx, cy, cw, ch, p, count)
+            days
+            |> Enum.with_index()
+            |> Enum.reduce(g, fn {day, d_idx}, acc ->
+              if day.holiday do
+                dx = time_col_w + d_idx * day_col_w + 2
+                hy = body_top + 10
+                hh = usable_h
+
+                acc
+                |> rrect({day_col_w - 4, hh, 4},
+                  fill: blend_past(pal.header_bg, pal.canvas_bg, false),
+                  stroke: {1, pal.divider},
+                  translate: {dx, hy}
+                )
+                |> text(truncate(day.holiday.long_name || day.holiday.name || "Ferien", 16),
+                  font_size: 15,
+                  fill: pal.text_secondary,
+                  translate: {dx + 8, hy + 28}
+                )
+              else
+                acc
+              end
             end)
 
-          draw_footer_inspector(g, {w, h}, footer_h, state)
+          # 5. Period Cards (PeriodCell)
+          g =
+            Enum.reduce(period_cards, g, fn {_act, cx, cy, cw, ch, item, past?}, acc ->
+              selected? =
+                state.selected_period != nil and state.selected_period.id == item.period.id
+
+              draw_untis_period_cell(acc, cx, cy, cw, ch, item, past?, selected?, pal)
+            end)
+
+          # 6. Current-Time Indicator (TimeLine in #FF6033)
+          g =
+            if now_min >= day_start_min and now_min <= day_end_min do
+              y_now = y_at.(now_min)
+              today_idx = Enum.find_index(days, &(Date.compare(&1.date, today) == :eq))
+
+              acc =
+                line(g, {{time_col_w, y_now}, {w, y_now}}, stroke: {1, pal.untis_orange})
+
+              if today_idx != nil do
+                tdx = time_col_w + today_idx * day_col_w
+
+                acc
+                |> rect({day_col_w, 3}, fill: pal.untis_orange, translate: {tdx, y_now - 1})
+                |> circle(4, fill: pal.untis_orange, translate: {tdx + 4, y_now})
+              else
+                acc
+              end
+            else
+              g
+            end
+
+          # 7. Bottom Inspector / Status Bar
+          draw_footer_inspector(g, {w, h}, footer_h, state, pal)
         end
 
         {draw_fn, hitboxes}
 
       _ ->
-        # Empty / Onboarding state when not logged in or loading
         btns = [
-          {{:nav, :wifi}, div(w, 2) - 270, div(h, 2) + 10, 250, 64, "1. Configure Wi-Fi", @green},
-          {{:nav, :untis}, div(w, 2) + 20, div(h, 2) + 10, 250, 64, "2. WebUntis Sign In", @accent}
+          {{:nav, :wifi}, div(w, 2) - 260, div(h, 2) + 10, 240, 56, "1. Wi-Fi einrichten", @green},
+          {{:nav, :untis}, div(w, 2) + 20, div(h, 2) + 10, 240, 56, "2. WebUntis Login", pal.untis_orange}
         ]
 
         hitboxes = Enum.map(btns, fn {a, x, y, bw, bh, _, _} -> {a, x, y, bw, bh} end)
@@ -834,26 +1018,30 @@ defmodule Pf1007lScenic.Scene.Home do
         draw_fn = fn g ->
           g =
             g
-            |> rrect({w - 80, 320, 16}, fill: @panel, stroke: {2, @border}, translate: {40, div(h, 2) - 180})
-            |> text("Student Timetable Dashboard (PF1007L)",
-              font_size: 32,
-              fill: @text_main,
-              translate: {80, div(h, 2) - 115}
+            |> rrect({w - 80, 280, 8},
+              fill: pal.regular_bg,
+              stroke: {1, pal.divider},
+              translate: {40, div(h, 2) - 160}
+            )
+            |> text("Untis Mobile Stundenplan (PF1007L)",
+              font_size: 26,
+              fill: pal.text_primary,
+              translate: {72, div(h, 2) - 105}
             )
             |> text(state.untis_status,
-              font_size: 22,
-              fill: @accent,
-              translate: {80, div(h, 2) - 65}
+              font_size: 19,
+              fill: pal.untis_orange,
+              translate: {72, div(h, 2) - 62}
             )
             |> text(
-              "Wi-Fi: #{state.wifi.connection} (#{state.wifi.ssid || "none"}, IP: #{state.wifi.ip || "none"})   |   Orientation: #{state.orientation} (SC7A20 X=#{ax} Y=#{ay} Z=#{az})",
-              font_size: 18,
-              fill: @text_muted,
-              translate: {80, div(h, 2) - 22}
+              "Wi-Fi: #{state.wifi.connection} (#{state.wifi.ssid || "none"}, IP: #{state.wifi.ip || "-"})  |  #{state.orientation} (X=#{ax} Y=#{ay} Z=#{az})",
+              font_size: 15,
+              fill: pal.text_secondary,
+              translate: {72, div(h, 2) - 24}
             )
 
           Enum.reduce(btns, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
-            draw_button(acc, x, y, bw, bh, lbl, col, 22)
+            draw_button(acc, x, y, bw, bh, lbl, col, 20)
           end)
         end
 
@@ -861,129 +1049,309 @@ defmodule Pf1007lScenic.Scene.Home do
     end
   end
 
-  defp draw_period_card(g, x, y, w, h, period, count) do
-    status = TimetableGrid.status(period)
+  defp draw_untis_period_cell(g, x, y, w, h, item, past?, selected?, pal) do
+    period = item.period
+    status = item.status
+    cancelled? = status == :cancelled
 
-    {bg, border_col, badge} =
+    {raw_bg, raw_border, border_w, pill_col} =
       case status do
-        :cancelled -> {{68, 24, 34}, @red, "CANCELLED"}
-        :exam -> {{54, 32, 88}, @purple, "EXAM"}
-        :changed -> {{72, 48, 18}, @amber, "CHANGED"}
-        :regular -> {{26, 49, 78}, @accent, nil}
+        :cancelled ->
+          {pal.cancelled_bg, pal.cancelled_border, 2, pal.cancelled_pill}
+
+        :exam ->
+          {pal.exam_bg, pal.exam_border, 2, pal.exam_pill}
+
+        :changed ->
+          {pal.changed_bg, pal.changed_border, 2, pal.changed_pill}
+
+        :regular ->
+          bg = if past?, do: pal.regular_past_bg, else: pal.regular_bg
+          {bg, pal.regular_border, 1, pal.changed_pill}
       end
 
-    subj =
-      case period.subjects do
-        [s | _] -> s.name || s.long_name || "?"
-        _ -> period.lesson_text || "Lesson"
-      end
+    bg = if status == :regular, do: raw_bg, else: blend_past(raw_bg, pal.canvas_bg, past?)
+    border_col = if selected?, do: pal.untis_orange, else: blend_past(raw_border, pal.divider, past?)
+    stroke_w = if selected?, do: 2, else: border_w
+    bar_col = blend_past(item.subject_color, pal.canvas_bg, past?)
+    fg_col = blend_past(pal.text_primary, pal.canvas_bg, past?)
+    sub_fg_col = blend_past(pal.text_secondary, pal.canvas_bg, past?)
 
-    room =
-      case period.rooms do
-        [r | _] -> r.name || ""
-        _ -> ""
-      end
-
-    teacher =
-      case period.teachers do
-        [t | _] -> t.name || ""
-        _ -> ""
-      end
-
-    extra = if count > 1, do: " (+#{count - 1})", else: ""
-    line1 = truncate("#{subj}#{extra}", div(w, 10))
-    line2 = truncate(String.trim("#{room}  #{teacher}"), div(w, 9))
-
+    # 1. Outer rounded card (radius = 4dp) + Left Subject Color Bar (width = 4dp, radius = 2dp)
     g =
       g
-      |> rrect({w, h, 8}, fill: bg, stroke: {2, border_col}, translate: {x, y})
-      |> text(line1,
-        font_size: if(h >= 58, do: 20, else: 17),
-        fill: @text_main,
-        translate: {x + 10, y + 23}
+      |> rrect({w, h, 4}, fill: bg, stroke: {stroke_w, border_col}, translate: {x, y})
+      |> rrect({4, max(h - 4, 4), 2}, fill: bar_col, translate: {x + 2, y + 2})
+
+    # 2. Resource Rows (Subject Bold, Teacher, Room, Info) starting at x + 10
+    text_x = x + 10
+    avail_w = max(w - 14, 10)
+    font_sz = cond do
+      h >= 68 and w >= 90 -> 14
+      h >= 46 -> 13
+      true -> 11
+    end
+    line_step = font_sz + 4
+
+    # Row 1: Subject (Bold)
+    g =
+      draw_resource_row(
+        g,
+        period.subjects,
+        period.lesson_text,
+        text_x,
+        y + font_sz + 2,
+        avail_w,
+        font_sz,
+        fg_col,
+        pill_col,
+        cancelled?,
+        :berkeley_mono_bold
       )
 
+    # Row 2: Teacher (if height fits at least 2 rows)
     g =
-      if h >= 46 and line2 != "" do
-        text(g, line2,
-          font_size: 15,
-          fill: @text_muted,
-          translate: {x + 10, y + 43}
+      if h >= font_sz + line_step + 4 and period.teachers != [] do
+        draw_resource_row(
+          g,
+          period.teachers,
+          nil,
+          text_x,
+          y + font_sz + 2 + line_step,
+          avail_w,
+          max(font_sz - 1, 11),
+          sub_fg_col,
+          pill_col,
+          cancelled?
         )
       else
         g
       end
 
-    if badge && h >= 64 do
-      text(g, badge,
-        font_size: 13,
-        fill: border_col,
-        translate: {x + 10, y + h - 8}
-      )
+    # Row 3: Room (if height fits at least 3 rows)
+    g =
+      if h >= font_sz + line_step * 2 + 4 and period.rooms != [] do
+        draw_resource_row(
+          g,
+          period.rooms,
+          nil,
+          text_x,
+          y + font_sz + 2 + line_step * 2,
+          avail_w,
+          max(font_sz - 1, 11),
+          sub_fg_col,
+          pill_col,
+          cancelled?
+        )
+      else
+        g
+      end
+
+    # Row 4: Info / Substitution / Exam text (if height fits 4 rows)
+    info_str =
+      cond do
+        period.exam != nil and is_binary(period.exam.name) -> period.exam.name
+        is_binary(period.substitution_text) -> period.substitution_text
+        is_binary(period.info) -> period.info
+        is_binary(period.lesson_text) -> period.lesson_text
+        true -> nil
+      end
+
+    g =
+      if h >= font_sz + line_step * 3 + 6 and is_binary(info_str) and info_str != "" do
+        max_chars = max(div(avail_w - 16, 7), 4)
+
+        text(g, truncate(info_str, max_chars),
+          font_size: max(font_sz - 2, 10),
+          fill: sub_fg_col,
+          translate: {text_x, y + font_sz + 2 + line_step * 3}
+        )
+      else
+        g
+      end
+
+    # 3. Bottom-Right Notification Icon Badges (14x14dp, radius = 3dp)
+    if h >= 32 and w >= 42 do
+      draw_period_badges(g, x + w - 3, y + h - 3, period, pill_col, sub_fg_col)
     else
       g
     end
   end
 
-  defp draw_footer_inspector(g, {w, h}, footer_h, state) do
+  defp draw_resource_row(g, elements, fallback_str, x, baseline_y, avail_w, font_sz, fg_col, pill_col, period_cancelled?, font \\ :berkeley_mono) do
+    max_chars = max(div(avail_w, max(div(font_sz * 3, 5), 6)), 3)
+
+    case elements do
+      [el | _] ->
+        cur_name = el.name || el.long_name || ""
+        orig_name = if el.original, do: el.original.name || el.original.long_name, else: nil
+
+        cond do
+          period_cancelled? or el.status == :removed ->
+            label = truncate(if(cur_name != "", do: cur_name, else: orig_name || "-"), max_chars)
+            strike_w = min(avail_w - 4, max(String.length(label) * div(font_sz * 3, 5), 14))
+            strike_y = baseline_y - div(font_sz, 3)
+
+            g
+            |> text(label, font: font, font_size: font_sz, fill: fg_col, translate: {x, baseline_y})
+            |> line({{x, strike_y}, {x + strike_w, strike_y}}, stroke: {1, pill_col})
+
+          el.status == :changed ->
+            label = truncate(cur_name, max(max_chars - 4, 3))
+            pill_w = min(avail_w - 2, max(String.length(label) * div(font_sz * 3, 5) + 8, 20))
+            pill_h = font_sz + 3
+            pill_y = baseline_y - font_sz
+
+            g =
+              g
+              |> rrect({pill_w, pill_h, 3}, fill: pill_col, translate: {x, pill_y})
+              |> text(label,
+                font: font,
+                font_size: font_sz,
+                fill: {255, 255, 255},
+                translate: {x + 4, baseline_y - 1}
+              )
+
+            if is_binary(orig_name) and orig_name != "" and avail_w - pill_w >= 26 do
+              ox = x + pill_w + 4
+              olabel = truncate(orig_name, max(div(avail_w - pill_w - 6, 7), 2))
+              ow = min(avail_w - pill_w - 6, max(String.length(olabel) * div(font_sz * 3, 5), 12))
+              strike_y = baseline_y - div(font_sz, 3)
+
+              g
+              |> text(olabel, font: font, font_size: max(font_sz - 1, 10), fill: fg_col, translate: {ox, baseline_y - 1})
+              |> line({{ox, strike_y}, {ox + ow, strike_y}}, stroke: {1, fg_col})
+            else
+              g
+            end
+
+          true ->
+            label =
+              elements
+              |> Enum.map(&(&1.name || &1.long_name || ""))
+              |> Enum.reject(&(&1 == ""))
+              |> Enum.join(", ")
+              |> truncate(max_chars)
+
+            text(g, label, font: font, font_size: font_sz, fill: fg_col, translate: {x, baseline_y})
+        end
+
+      [] when is_binary(fallback_str) and fallback_str != "" ->
+        text(g, truncate(fallback_str, max_chars), font: font, font_size: font_sz, fill: fg_col, translate: {x, baseline_y})
+
+      _ ->
+        g
+    end
+  end
+
+  defp draw_period_badges(g, right_x, bottom_y, period, pill_col, muted_col) do
+    badges =
+      []
+      |> then(fn acc ->
+        if period.online?, do: [{"V", muted_col} | acc], else: acc
+      end)
+      |> then(fn acc ->
+        if period.substitution_text != nil or period.info != nil or period.lesson_text != nil,
+          do: [{"i", pill_col} | acc],
+          else: acc
+      end)
+      |> then(fn acc ->
+        if period.homework != [], do: [{"H", {0, 125, 100}} | acc], else: acc
+      end)
+      |> then(fn acc ->
+        if Untis.Period.exam?(period), do: [{"E", {197, 125, 0}} | acc], else: acc
+      end)
+
+    badges
+    |> Enum.with_index()
+    |> Enum.reduce(g, fn {{sym, col}, idx}, acc ->
+      bx = right_x - (idx + 1) * 16 + 2
+      by = bottom_y - 14
+
+      acc
+      |> rrect({14, 14, 3}, fill: col, translate: {bx, by})
+      |> text(sym, font_size: 10, fill: {255, 255, 255}, translate: {bx + 4, by + 11})
+    end)
+  end
+
+  defp blend_past({r, g, b}, {br, bg, bb}, true) do
+    {div(r + br, 2), div(g + bg, 2), div(b + bb, 2)}
+  end
+
+  defp blend_past(color, _bg, false), do: color
+
+  defp draw_footer_inspector(g, {w, h}, footer_h, state, pal) do
     fy = h - footer_h
     {ax, ay, az} = state.accel_raw
 
-    {line1, line2} =
-      case state.selected_period do
-        nil ->
-          target_name =
-            case Enum.at(state.targets, state.selected_target_idx) do
-              {n, _} -> n
-              _ -> "Student"
-            end
+    case state.selected_period do
+      nil ->
+        info =
+          "#{state.untis_status}  •  Wi-Fi: #{state.wifi.ssid || state.wifi.connection} (#{state.wifi.ip || "-"})  •  #{state.orientation} (#{ax},#{ay},#{az})"
 
-          {
-            "#{target_name} • Week of #{Date.to_iso8601(state.date)} • Tap any lesson card for details",
-            "#{state.untis_status}   |   Wi-Fi: #{state.wifi.ssid || state.wifi.connection} (#{state.wifi.ip || "-"})   |   #{state.orientation} (X=#{ax} Y=#{ay} Z=#{az})"
-          }
+        g
+        |> rect({w, footer_h}, fill: pal.top_bar_bg, translate: {0, fy})
+        |> line({{0, fy}, {w, fy}}, stroke: {1, pal.divider})
+        |> text(truncate(info, div(w, 7)),
+          font_size: 13,
+          fill: pal.text_secondary,
+          translate: {12, fy + 21}
+        )
 
-        p ->
-          subjs = Enum.map_join(p.subjects, ", ", &(&1.long_name || &1.name))
-          teachers = Enum.map_join(p.teachers, ", ", &(&1.long_name || &1.name))
-          rooms = Enum.map_join(p.rooms, ", ", &(&1.long_name || &1.name))
-          t_str = "#{TimetableGrid.format_time(p.start)}–#{TimetableGrid.format_time(p.end)}"
+      p ->
+        subjs = Enum.map_join(p.subjects, ", ", &(&1.long_name || &1.name || ""))
+        teachers =
+          Enum.map_join(p.teachers, ", ", fn t ->
+            base = t.long_name || t.name || ""
+            if t.original, do: "#{base} (#{t.original.name || t.original.long_name})", else: base
+          end)
 
-          notes =
-            [p.substitution_text, p.lesson_text, p.info]
-            |> Enum.reject(&(&1 in [nil, ""]))
-            |> Enum.join(" • ")
+        rooms =
+          Enum.map_join(p.rooms, ", ", fn r ->
+            base = r.long_name || r.name || ""
+            if r.original, do: "#{base} (#{r.original.name || r.original.long_name})", else: base
+          end)
 
-          hw =
-            case p.homework do
-              [first | _] -> " | HW: #{first.text}"
-              _ -> ""
-            end
+        t_str = "#{TimetableGrid.format_time(p.start)}–#{TimetableGrid.format_time(p.end)}"
 
-          {
-            "#{t_str}  #{subjs}  —  Room: #{rooms}  —  Teacher: #{teachers}",
-            truncate("#{if notes == "", do: "Regular lesson", else: notes}#{hw}", div(w, 8))
-          }
-      end
+        notes =
+          [
+            if(p.exam, do: "Prüfung: #{p.exam.name} #{p.exam.text}", else: nil),
+            p.substitution_text,
+            p.info,
+            p.lesson_text
+          ]
+          |> Enum.reject(&(&1 in [nil, ""]))
+          |> Enum.join(" • ")
 
-    g
-    |> rect({w, footer_h}, fill: @panel, translate: {0, fy})
-    |> line({{0, fy}, {w, fy}}, stroke: {2, @border})
-    |> text(truncate(line1, div(w, 9)),
-      font_size: 20,
-      fill: @text_main,
-      translate: {20, fy + 32}
-    )
-    |> text(truncate(line2, div(w, 8)),
-      font_size: 16,
-      fill: @text_muted,
-      translate: {20, fy + 62}
-    )
+        hw =
+          case p.homework do
+            [first | _] -> " | HA: #{first.text}"
+            _ -> ""
+          end
+
+        line1 = "#{t_str}  #{subjs}  •  Raum: #{rooms}  •  Lehrkraft: #{teachers}"
+        line2 = "#{if notes == "", do: "Regulärer Unterricht", else: notes}#{hw}"
+
+        g
+        |> rect({w, footer_h}, fill: pal.top_bar_bg, translate: {0, fy})
+        |> line({{0, fy}, {w, fy}}, stroke: {2, pal.untis_orange})
+        |> text(truncate(line1, div(w, 8)),
+          font_size: 16,
+          fill: pal.text_primary,
+          translate: {14, fy + 26}
+        )
+        |> text(truncate(line2, div(w, 7)),
+          font_size: 14,
+          fill: pal.text_secondary,
+          translate: {14, fy + 50}
+        )
+    end
   end
 
   # --- View 2: On-Screen Wi-Fi Setup ---
 
-  defp build_wifi_view({w, _h}, state) do
+  defp build_wifi_view({w, h}, state) do
     pw_masked =
       if state.wifi_show_pw? do
         state.wifi_password
@@ -1008,7 +1376,8 @@ defmodule Pf1007lScenic.Scene.Home do
     rw = div(w, 2) - 36
 
     form_btns = [
-      {:wifi_scan, 24, 132, 200, 48, "↻ Scan Networks", @accent},
+      {{:nav, :timetable}, 24, 68, 170, 42, "← Stundenplan", @panel_alt},
+      {:wifi_scan, 24, 132, 200, 48, "Scan Networks", @accent},
       {{:focus_field, :wifi_ssid}, rx, 155, rw, 52, "SSID: #{state.wifi_ssid}",
        if(state.active_field == :wifi_ssid, do: {28, 78, 118}, else: @panel_alt)},
       {{:focus_field, :wifi_password}, rx, 222, rw - 100, 52, "Password: #{pw_masked}",
@@ -1024,27 +1393,41 @@ defmodule Pf1007lScenic.Scene.Home do
       status_str =
         "wlan0: #{state.wifi.connection}   |   SSID: #{state.wifi.ssid || "none"}   |   IPv4: #{state.wifi.ip || "none"}"
 
+      msg = state.wifi_message || "Tap a network on the left or enter an SSID on the right."
+      msg_lines = wrap_lines(msg, max(28, div(rw, 11)))
+
       g =
         g
+        |> rect({w, h - 56}, fill: @bg, translate: {0, 56})
         |> text("Wi-Fi Network Configuration (AIC8800DC)",
-          font_size: 26,
+          font_size: 24,
           fill: @text_main,
-          translate: {24, 114}
+          translate: {210, 98}
         )
         |> text(status_str,
           font_size: 18,
           fill: @accent,
           translate: {245, 164}
         )
-        |> text(state.wifi_message || "Tap a network on the left or enter an SSID on the right.",
-          font_size: 18,
-          fill: @text_muted,
-          translate: {rx, 378}
-        )
 
-      Enum.reduce(all_btns, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
-        draw_button(acc, x, y, bw, bh, lbl, col, 19)
-      end)
+      g =
+        msg_lines
+        |> Enum.take(3)
+        |> Enum.with_index()
+        |> Enum.reduce(g, fn {line, idx}, acc ->
+          text(acc, line,
+            font_size: 17,
+            fill: @text_muted,
+            translate: {rx, 376 + idx * 24}
+          )
+        end)
+
+      g =
+        Enum.reduce(all_btns, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
+          draw_button(acc, x, y, bw, bh, lbl, col, 19)
+        end)
+
+      draw_touch_dot(g, state.touch_pos)
     end
 
     {draw_fn, hitboxes}
@@ -1052,7 +1435,7 @@ defmodule Pf1007lScenic.Scene.Home do
 
   # --- View 3: On-Screen WebUntis Setup ---
 
-  defp build_untis_view({w, _h}, state) do
+  defp build_untis_view({w, h}, state) do
     pw_masked =
       if state.untis_show_pw? do
         state.untis_password
@@ -1075,6 +1458,7 @@ defmodule Pf1007lScenic.Scene.Home do
       end)
 
     form_btns = [
+      {{:nav, :timetable}, 24, 68, 170, 42, "← Stundenplan", @panel_alt},
       {{:focus_field, :school_query}, 24, 132, lw - 120, 50, "Search: #{state.school_query}",
        if(state.active_field == :school_query, do: {28, 78, 118}, else: @panel_alt)},
       {:untis_search_schools, 24 + lw - 112, 132, 112, 50, "Search", @accent},
@@ -1097,22 +1481,35 @@ defmodule Pf1007lScenic.Scene.Home do
     hitboxes = Enum.map(all_btns, fn {a, x, y, bw, bh, _, _} -> {a, x, y, bw, bh} end)
 
     draw_fn = fn g ->
+      status_lines = wrap_lines(state.untis_status || "", max(28, div(lw, 11)))
+
       g =
         g
+        |> rect({w, h - 56}, fill: @bg, translate: {0, 56})
         |> text("WebUntis Account & School Setup",
           font_size: 24,
           fill: @text_main,
-          translate: {24, 112}
-        )
-        |> text(truncate(state.untis_status, div(w, 9)),
-          font_size: 18,
-          fill: @accent,
-          translate: {24, 224}
+          translate: {210, 98}
         )
 
-      Enum.reduce(all_btns, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
-        draw_button(acc, x, y, bw, bh, lbl, col, 18)
-      end)
+      g =
+        status_lines
+        |> Enum.take(2)
+        |> Enum.with_index()
+        |> Enum.reduce(g, fn {line, idx}, acc ->
+          text(acc, line,
+            font_size: 16,
+            fill: @accent,
+            translate: {24, 210 + idx * 22}
+          )
+        end)
+
+      g =
+        Enum.reduce(all_btns, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
+          draw_button(acc, x, y, bw, bh, lbl, col, 18)
+        end)
+
+      draw_touch_dot(g, state.touch_pos)
     end
 
     {draw_fn, hitboxes}
@@ -1128,16 +1525,16 @@ defmodule Pf1007lScenic.Scene.Home do
         _ -> @kb_rows_lower
       end
 
-    kb_h = 310
+    kb_h = 320
     kb_y = h - kb_h
-    row_h = 50
-    pad = 6
+    row_h = 48
+    pad = 5
 
     key_specs =
       rows
       |> Enum.with_index()
       |> Enum.flat_map(fn {row_keys, r_idx} ->
-        ry = kb_y + 48 + r_idx * (row_h + pad)
+        ry = kb_y + 44 + r_idx * (row_h + pad)
         n = length(row_keys)
         base_w = div(w - 24 - (n - 1) * pad, n)
 
@@ -1158,7 +1555,11 @@ defmodule Pf1007lScenic.Scene.Home do
         end)
       end)
 
-    hitboxes = Enum.map(key_specs, fn {a, x, y, bw, bh, _, _} -> {a, x, y, bw, bh} end)
+    hitboxes =
+      Enum.map(key_specs, fn {a, x, y, bw, bh, _, _} ->
+        {a, x - 2, y - 2, bw + 4, bh + 4}
+      end)
+
     cur_val = get_active_field(state)
 
     draw_fn = fn g ->
@@ -1169,18 +1570,21 @@ defmodule Pf1007lScenic.Scene.Home do
         |> text("Editing #{state.active_field}:  #{cur_val}_",
           font_size: 22,
           fill: @accent,
-          translate: {20, kb_y + 32}
+          translate: {20, kb_y + 30}
         )
 
-      Enum.reduce(key_specs, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
-        draw_button(acc, x, y, bw, bh, lbl, col, 20)
-      end)
+      g =
+        Enum.reduce(key_specs, g, fn {_a, x, y, bw, bh, lbl, col}, acc ->
+          draw_key_button(acc, x, y, bw, bh, lbl, col, 20)
+        end)
+
+      draw_touch_dot(g, state.touch_pos)
     end
 
     {draw_fn, hitboxes}
   end
 
-  defp draw_button(g, x, y, w, h, label, bg_color, font_sz \\ 20) do
+  defp draw_button(g, x, y, w, h, label, bg_color, font_sz) do
     g
     |> rrect({w, h, 8}, fill: bg_color, stroke: {1, @border}, translate: {x, y})
     |> text(label,
@@ -1189,6 +1593,45 @@ defmodule Pf1007lScenic.Scene.Home do
       translate: {x + 12, y + div(h, 2) + div(font_sz, 3)}
     )
   end
+
+  defp draw_key_button(g, x, y, w, h, label, bg_color, font_sz) do
+    g
+    |> rrect({w, h, 8}, fill: bg_color, stroke: {1, @border}, translate: {x, y})
+    |> text(label,
+      font: :berkeley_mono_bold,
+      font_size: font_sz,
+      fill: @text_main,
+      text_align: :center,
+      translate: {x + div(w, 2), y + div(h, 2) + div(font_sz, 3)}
+    )
+  end
+
+  defp draw_touch_dot(g, {tx, ty}) do
+    circle(g, 5, fill: @accent, stroke: {1, @text_main}, translate: {tx, ty})
+  end
+
+  defp wrap_lines(str, max_chars) when is_binary(str) and max_chars > 5 do
+    str
+    |> String.split(~r/\s+/, trim: true)
+    |> Enum.reduce({[], ""}, fn word, {lines, cur} ->
+      cond do
+        cur == "" ->
+          {lines, word}
+
+        String.length(cur) + 1 + String.length(word) <= max_chars ->
+          {lines, cur <> " " <> word}
+
+        true ->
+          {[cur | lines], word}
+      end
+    end)
+    |> then(fn
+      {lines, ""} -> Enum.reverse(lines)
+      {lines, last} -> Enum.reverse([last | lines])
+    end)
+  end
+
+  defp wrap_lines(str, _), do: [to_string(str || "")]
 
   defp truncate(str, max_chars) when is_binary(str) and max_chars > 3 do
     if String.length(str) > max_chars do
